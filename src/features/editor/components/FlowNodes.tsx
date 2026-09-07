@@ -28,6 +28,7 @@ export type ScreenNodeData = {
   stateLabel: string;
   stateCount: number;
   isStart?: boolean;
+  canStartInteractions?: boolean;
   warning?: boolean | string;
   active?: boolean;
   dimmed?: boolean;
@@ -36,6 +37,7 @@ export type ScreenNodeData = {
 export type InteractionNodeData = {
   label: string;
   trigger: string;
+  sourceStateLabel: string;
   outcomeCount: number;
   active?: boolean;
   dimmed?: boolean;
@@ -171,15 +173,17 @@ export function ScreenNode({
         </span>
       )}
 
-      <Handle
-        aria-label={`Start an outgoing path from ${data.label}`}
-        className={handleClassName}
-        id="out"
-        isConnectable={isConnectable}
-        position={Position.Right}
-        title={`Outgoing path from ${data.label}`}
-        type="source"
-      />
+      {data.canStartInteractions !== false && (
+        <Handle
+          aria-label={`Start an outgoing path from ${data.label}`}
+          className={handleClassName}
+          id="out"
+          isConnectable={isConnectable}
+          position={Position.Right}
+          title={`Outgoing path from ${data.label}`}
+          type="source"
+        />
+      )}
     </div>
   );
 }
@@ -194,7 +198,7 @@ export function InteractionNode({
 
   return (
     <div
-      aria-label={`Interaction ${data.label}, trigger ${data.trigger}, ${outcomeLabel}${data.active ? ", active in simulation" : ""}`}
+      aria-label={`Interaction ${data.label}, trigger ${data.trigger}, from ${data.sourceStateLabel}, ${outcomeLabel}${data.active ? ", active in simulation" : ""}`}
       className={`relative w-[202px] rounded-[14px] border bg-[#fffefa] px-3 py-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
       role="group"
     >
@@ -224,6 +228,9 @@ export function InteractionNode({
               <GitBranch className="size-2.5" strokeWidth={2.4} aria-hidden="true" />
               {outcomeLabel}
             </span>
+          </div>
+          <div className="mt-1 truncate text-[7.5px] font-medium text-[#85827b]">
+            From {data.sourceStateLabel}
           </div>
         </div>
       </div>

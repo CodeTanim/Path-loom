@@ -88,6 +88,8 @@ export interface Interaction {
   name: string;
   kind: InteractionKind;
   trigger: InteractionTrigger;
+  /** Optional canvas placement; older v1 documents derive a stable fallback. */
+  position?: CanvasPosition;
   sourceNodeId: string;
   /** null means the interaction is available from the node as a whole. */
   sourceStateId: string | null;

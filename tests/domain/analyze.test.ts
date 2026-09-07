@@ -86,6 +86,25 @@ describe("analyzeProject", () => {
     expect(report.unreachableNodeIds).toEqual(["done"]);
   });
 
+  it("reports interactions that cannot continue because they have no outcomes", () => {
+    const project = createProject();
+    project.interactions[0].outcomes = [];
+
+    const report = analyzeProject(project);
+
+    expect(report.missingOutcomeInteractionIds).toEqual(["continue"]);
+    expect(report.issues).toContainEqual({
+      type: "missing-outcome",
+      severity: "warning",
+      interactionId: "continue",
+      message: "Interaction continue does not define any outcomes.",
+    });
+    expect(report.summary.missingOutcomes).toBe(1);
+    expect(report.deadEndStatePairs).toEqual([
+      { nodeId: "start", stateId: "start-idle" },
+    ]);
+  });
+
   it("separates unresolved outcomes from dangling node and state references", () => {
     const project = createProject({
       interactions: [

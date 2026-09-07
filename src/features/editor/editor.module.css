@@ -10,6 +10,10 @@
   overflow: hidden;
 }
 
+.viewportGuard {
+  display: none;
+}
+
 .topbar {
   grid-column: 1 / -1;
   min-width: 0;
@@ -101,6 +105,14 @@
   border-radius: 999px;
 }
 
+.saveDotSaving {
+  background: #d48a25;
+}
+
+.saveDotFailed {
+  background: #d65b52;
+}
+
 .topbarCenter {
   justify-content: center;
 }
@@ -149,6 +161,13 @@
   opacity: 0.32;
 }
 
+.quickAdd:disabled,
+.toolButton:disabled,
+.miniAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
 .modeSwitch {
   display: flex;
   padding: 3px;
@@ -190,10 +209,15 @@
   font-weight: 650;
 }
 
-.coverageButton:hover,
+.coverageButton:hover:not(:disabled),
 .coverageActive {
   border-color: #d3a04c;
   background: #ffefc9;
+}
+
+.coverageButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .issueCount {
@@ -276,6 +300,29 @@
   flex-direction: column;
   border-left: 1px solid #dde2dd;
   overflow: hidden;
+}
+
+.inspectorFieldset {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  overflow: hidden;
+}
+
+.readOnlyNotice {
+  margin-bottom: 12px;
+  padding: 9px 10px;
+  border: 1px solid #d9d3f1;
+  border-radius: 8px;
+  color: #5c51a5;
+  background: #f3f1ff;
+  font-size: 9px;
+  line-height: 1.45;
 }
 
 .panelHeader {
@@ -743,6 +790,17 @@
   margin-top: 9px;
 }
 
+.missingStates {
+  margin-top: 12px;
+}
+
+.stateSuggestions {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .miniAction,
 .stateAction,
 .issueAction {
@@ -882,12 +940,6 @@
 .outcomeRowActive {
   border-color: #83afa4;
   background: #f2f8f5;
-}
-
-.dragDots {
-  color: #b1b7b2;
-  line-height: 0.6;
-  font-size: 9px;
 }
 
 .semanticDot {
@@ -1293,5 +1345,70 @@
   .saveState,
   .coverageButton span:not(.issueCount) {
     display: none;
+  }
+
+  .simulationTray {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .trayStep {
+    grid-column: 1 / -1;
+    padding: 0 0 10px;
+    border-right: 0;
+    border-bottom: 1px solid #e1e6e2;
+  }
+}
+
+@media (max-width: 1039px) {
+  .shell {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    overflow: auto;
+  }
+
+  .shell > :not(.viewportGuard) {
+    display: none;
+  }
+
+  .viewportGuard {
+    min-height: 100dvh;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #28322e;
+    background:
+      radial-gradient(circle at 50% 30%, rgba(102, 87, 217, 0.1), transparent 38%),
+      #f6f7f3;
+    text-align: center;
+  }
+
+  .viewportGuardIcon {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 16px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #d8d2f1;
+    border-radius: 15px;
+    color: #6657d9;
+    background: #f0edff;
+  }
+
+  .viewportGuard h1 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: -0.03em;
+  }
+
+  .viewportGuard p {
+    max-width: 440px;
+    margin: 10px 0 0;
+    color: #6c746f;
+    font-size: 13px;
+    line-height: 1.55;
   }
 }

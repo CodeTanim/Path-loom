@@ -83,6 +83,12 @@ export type AnalysisIssue =
       message: string;
     }
   | {
+      type: "missing-outcome";
+      severity: "warning";
+      interactionId: string;
+      message: string;
+    }
+  | {
       type: "unreachable-node";
       severity: "warning";
       nodeId: string;
@@ -117,6 +123,7 @@ export interface AnalysisSummary {
   unresolvedBranches: number;
   missingStates: number;
   outcomeStateKindMismatches: number;
+  missingOutcomes: number;
   errors: number;
   warnings: number;
 }
@@ -134,6 +141,8 @@ export interface ProjectAnalysis {
   unresolvedBranches: UnresolvedBranch[];
   missingStates: MissingState[];
   outcomeStateKindMismatches: OutcomeStateKindMismatch[];
+  /** Interactions that cannot continue because they define no outcomes. */
+  missingOutcomeInteractionIds: string[];
   issues: AnalysisIssue[];
   summary: AnalysisSummary;
 }
@@ -511,6 +520,9 @@ export function analyzeProject(project: ProjectDocument): ProjectAnalysis {
     project,
     nodesById,
   );
+  const missingOutcomeInteractionIds = project.interactions
+    .filter((interaction) => interaction.outcomes.length === 0)
+    .map((interaction) => interaction.id);
 
   const issues: AnalysisIssue[] = [];
 
@@ -552,6 +564,14 @@ export function analyzeProject(project: ProjectDocument): ProjectAnalysis {
       severity: "warning",
       branch,
       message: `Outcome ${branch.outcomeId} does not have a target yet.`,
+    });
+  }
+  for (const interactionId of missingOutcomeInteractionIds) {
+    issues.push({
+      type: "missing-outcome",
+      severity: "warning",
+      interactionId,
+      message: `Interaction ${interactionId} does not define any outcomes.`,
     });
   }
   for (const nodeId of unreachableNodeIds) {
@@ -598,6 +618,7 @@ export function analyzeProject(project: ProjectDocument): ProjectAnalysis {
     unresolvedBranches,
     missingStates,
     outcomeStateKindMismatches,
+    missingOutcomeInteractionIds,
     issues,
     summary: {
       totalNodes: project.nodes.length,
@@ -608,6 +629,7 @@ export function analyzeProject(project: ProjectDocument): ProjectAnalysis {
       unresolvedBranches: unresolvedBranches.length,
       missingStates: missingStates.length,
       outcomeStateKindMismatches: outcomeStateKindMismatches.length,
+      missingOutcomes: missingOutcomeInteractionIds.length,
       errors: issues.filter((issue) => issue.severity === "error").length,
       warnings: issues.filter((issue) => issue.severity === "warning").length,
     },

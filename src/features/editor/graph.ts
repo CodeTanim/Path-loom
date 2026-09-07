@@ -5,6 +5,7 @@ import {
 } from "@xyflow/react";
 
 import type {
+  CanvasPosition,
   CoreUIStateKind,
   Interaction,
   OutcomeKind,
@@ -94,20 +95,20 @@ function warningForNode(
   return undefined;
 }
 
-function displayInteraction(interaction: Interaction) {
-  return interaction.kind === "async" || interaction.outcomes.length > 1;
-}
-
 function interactionPosition(
   project: ProjectDocument,
   interaction: Interaction,
 ) {
+  if (interaction.position) return interaction.position;
   const source = project.nodes.find(
     (node) => node.id === interaction.sourceNodeId,
   );
+  const siblingIndex = project.interactions
+    .filter((item) => item.sourceNodeId === interaction.sourceNodeId)
+    .findIndex((item) => item.id === interaction.id);
   return {
     x: (source?.position.x ?? 0) + 330,
-    y: (source?.position.y ?? 0) + 55,
+    y: (source?.position.y ?? 0) + 55 + Math.max(siblingIndex, 0) * 105,
   };
 }
 
@@ -137,9 +138,10 @@ export function buildEditorNodes(
       variant:
         NODE_VARIANTS[node.id] ??
         variantForState(initialState?.kind, "checkout"),
-      stateLabel: humanize(initialState?.kind ?? "idle"),
+      stateLabel: initialState?.name ?? "Invalid initial state",
       stateCount: node.states.length,
       isStart: project.entryNodeId === node.id,
+      canStartInteractions: node.kind !== "terminal",
       warning: warningForNode(node.id, analysis),
     };
     return {
@@ -151,20 +153,27 @@ export function buildEditorNodes(
   });
 
   for (const interaction of project.interactions) {
-    if (displayInteraction(interaction)) {
-      const data: InteractionNodeData = {
-        label: interaction.name,
-        trigger: humanize(interaction.trigger),
-        outcomeCount: interaction.outcomes.length,
-      };
-      nodes.push({
-        id: interactionNodeId(interaction.id),
-        type: "interaction",
-        position: interactionPosition(project, interaction),
-        data,
-        draggable: false,
-      });
-    }
+    const sourceNode = project.nodes.find(
+      (node) => node.id === interaction.sourceNodeId,
+    );
+    const sourceState = sourceNode?.states.find(
+      (state) => state.id === interaction.sourceStateId,
+    );
+    const data: InteractionNodeData = {
+      label: interaction.name,
+      trigger: humanize(interaction.trigger),
+      sourceStateLabel:
+        interaction.sourceStateId === null
+          ? "All states"
+          : sourceState?.name ?? "Missing state",
+      outcomeCount: interaction.outcomes.length,
+    };
+    nodes.push({
+      id: interactionNodeId(interaction.id),
+      type: "interaction",
+      position: interactionPosition(project, interaction),
+      data,
+    });
 
     interaction.outcomes.forEach((outcome, outcomeIndex) => {
       if (outcome.target !== null) return;
@@ -197,12 +206,23 @@ export function buildEditorNodes(
 }
 
 function edgeForOutcome(
+  project: ProjectDocument,
   source: string,
   interaction: Interaction,
   outcomeIndex: number,
 ): Edge {
   const outcome = interaction.outcomes[outcomeIndex];
   const color = OUTCOME_COLORS[outcome.kind];
+  const targetNode = project.nodes.find(
+    (node) => node.id === outcome.target?.nodeId,
+  );
+  const targetState = targetNode?.states.find(
+    (state) =>
+      state.id === (outcome.target?.stateId ?? targetNode.initialStateId),
+  );
+  const targetStateLabel = outcome.target
+    ? targetState?.name ?? "Invalid state"
+    : "Unresolved";
   return {
     id: `edge:${outcome.id}`,
     source,
@@ -211,7 +231,7 @@ function edgeForOutcome(
       outcome.target?.nodeId ?? unresolvedNodeId(outcome.id),
     targetHandle: outcome.target ? "in" : undefined,
     type: "smoothstep",
-    label: humanize(outcome.name),
+    label: `${humanize(outcome.name)} → ${targetStateLabel}`,
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 },
     style: { stroke: color, strokeWidth: 1.7 },
     labelBgPadding: [7, 4],
@@ -235,49 +255,47 @@ export function buildEditorEdges(project: ProjectDocument): Edge[] {
   const edges: Edge[] = [];
 
   for (const interaction of project.interactions) {
-    if (displayInteraction(interaction)) {
-      edges.push({
-        id: `edge:into:${interaction.id}`,
-        source: interaction.sourceNodeId,
-        sourceHandle: "out",
-        target: interactionNodeId(interaction.id),
-        targetHandle: "in",
-        type: "smoothstep",
-        label: interaction.name,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: "#137b68",
-          width: 14,
-          height: 14,
-        },
-        style: { stroke: "#137b68", strokeWidth: 1.8 },
-        labelBgPadding: [7, 4],
-        labelBgBorderRadius: 7,
-        labelBgStyle: {
-          fill: "#fffefa",
-          stroke: "#137b6833",
-          strokeWidth: 1,
-        },
-        labelStyle: { fill: "#137b68", fontSize: 9, fontWeight: 650 },
-        data: { interactionId: interaction.id },
-      });
-
-      interaction.outcomes.forEach((_, outcomeIndex) => {
-        edges.push(
-          edgeForOutcome(
-            interactionNodeId(interaction.id),
-            interaction,
-            outcomeIndex,
-          ),
-        );
-      });
-      continue;
-    }
+    const sourceNode = project.nodes.find(
+      (node) => node.id === interaction.sourceNodeId,
+    );
+    const sourceState = sourceNode?.states.find(
+      (state) => state.id === interaction.sourceStateId,
+    );
+    const sourceScope =
+      interaction.sourceStateId === null
+        ? "all states"
+        : sourceState?.name ?? "missing state";
+    edges.push({
+      id: `edge:into:${interaction.id}`,
+      source: interaction.sourceNodeId,
+      sourceHandle: "out",
+      target: interactionNodeId(interaction.id),
+      targetHandle: "in",
+      type: "smoothstep",
+      label: `${interaction.name} · ${sourceScope}`,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: "#137b68",
+        width: 14,
+        height: 14,
+      },
+      style: { stroke: "#137b68", strokeWidth: 1.8 },
+      labelBgPadding: [7, 4],
+      labelBgBorderRadius: 7,
+      labelBgStyle: {
+        fill: "#fffefa",
+        stroke: "#137b6833",
+        strokeWidth: 1,
+      },
+      labelStyle: { fill: "#137b68", fontSize: 9, fontWeight: 650 },
+      data: { interactionId: interaction.id },
+    });
 
     interaction.outcomes.forEach((_, outcomeIndex) => {
       edges.push(
         edgeForOutcome(
-          interaction.sourceNodeId,
+          project,
+          interactionNodeId(interaction.id),
           interaction,
           outcomeIndex,
         ),
@@ -301,7 +319,56 @@ export function applyNodePositions(
       ...node,
       position: positions.get(node.id) ?? node.position,
     })),
+    interactions: project.interactions.map((interaction) => ({
+      ...interaction,
+      position:
+        positions.get(interactionNodeId(interaction.id)) ??
+        interaction.position,
+    })),
   };
+}
+
+export function moveEditorNodeWithDependents(
+  project: ProjectDocument,
+  nodes: Node[],
+  draggedNodeId: string,
+  nextPosition: CanvasPosition,
+  previousPosition: CanvasPosition,
+): Node[] {
+  const dependentNodeIds = new Set<string>();
+
+  if (draggedNodeId.startsWith("interaction:")) {
+    const interactionId = draggedNodeId.slice("interaction:".length);
+    const interaction = project.interactions.find(
+      (item) => item.id === interactionId,
+    );
+    interaction?.outcomes.forEach((outcome) => {
+      if (outcome.target === null) {
+        dependentNodeIds.add(unresolvedNodeId(outcome.id));
+      }
+    });
+  }
+
+  const delta = {
+    x: nextPosition.x - previousPosition.x,
+    y: nextPosition.y - previousPosition.y,
+  };
+
+  return nodes.map((node) => {
+    if (node.id === draggedNodeId) {
+      return { ...node, position: { ...nextPosition } };
+    }
+    if (dependentNodeIds.has(node.id)) {
+      return {
+        ...node,
+        position: {
+          x: node.position.x + delta.x,
+          y: node.position.y + delta.y,
+        },
+      };
+    }
+    return node;
+  });
 }
 
 export function preserveNodePositions(next: Node[], current: Node[]): Node[] {

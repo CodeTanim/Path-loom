@@ -24,12 +24,13 @@ The first working build focuses on a checkout recovery flow and includes:
 
 - A pannable, zoomable, draggable React Flow canvas
 - Screen cards with explicit UI states and live miniature previews
-- An interaction node with multiple semantic outcomes
-- A state debugger for idle, loading, success, empty, error, offline, and unauthorized states
-- A journey simulator with branch selection, history, back, and restart
-- A live UX coverage checker for missing states, unresolved branches, dead ends, and unreachable nodes
-- One-click fixes that update the document and immediately rerun analysis
-- Undo/redo, keyboard shortcuts, connection handles, local persistence, search, selection, and screen creation
+- Visible, movable interaction nodes with multiple semantic outcomes
+- An exact-state debugger for idle, loading, success, empty, error, offline, and unauthorized states
+- A state-accurate journey simulator with branch selection, history, back, and restart
+- A live UX coverage checker for invalid references, missing states or outcomes, unresolved branches, dead ends, mismatched outcome states, and unreachable nodes
+- Contextual fixes and guided repairs that immediately rerun analysis
+- Undo/redo for document edits and canvas movement, plus keyboard shortcuts, connection handles, search, selection, and screen creation
+- Versioned local persistence with structural validation and safe fallback for corrupt drafts
 - A serializable, renderer-independent domain model with schema versioning
 
 The seeded example intentionally starts with three findings. Open **Coverage** to repair them, or choose **Run flow** to walk through each payment outcome.
@@ -44,6 +45,15 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+## Try the MVP loop
+
+1. Open **Coverage** to inspect the three deliberate gaps in the seeded checkout flow.
+2. Apply a suggested state or branch repair and watch the finding count update immediately.
+3. Select a screen, open **Logic**, add an interaction, and use **Add outcome** to branch it toward distinct screen/state targets.
+4. Drag a screen or interaction to reorganize the graph, then use **Undo** and **Redo** to verify that both content and placement are restored.
+5. Choose **Run flow**, select **Submit payment**, and compare the success, decline, timeout, offline, and session-expired destination states.
+6. Reload the page to confirm that the last valid local document is restored.
 
 ## Validate
 
@@ -67,7 +77,8 @@ src/
   app/                       Next.js shell and metadata
   domain/
     model.ts                 Serializable Pathloom document contract
-    analyze.ts               Pure graph and coverage analysis
+    analyze.ts               Pure state-pair graph and coverage analysis
+    validate.ts              Saved-document validation boundary
     samples/checkout.ts      Seeded checkout recovery document
   features/editor/
     PathloomEditor.tsx       Editor state, history, persistence, and orchestration
@@ -75,7 +86,8 @@ src/
     Inspector.tsx            State debugger and coverage fixes
     SimulationTray.tsx       Ephemeral journey simulation
     components/              Stateful screen previews and custom nodes
-tests/domain/                Analysis unit tests
+tests/domain/                Analysis and document-validation unit tests
+tests/editor/                Domain-to-canvas projection unit tests
 ```
 
 The `ProjectDocument` is authoritative. React Flow nodes and edges are projections of that data, and simulator state stays ephemeral. This keeps the model portable to future renderers, collaboration layers, import/export, and schema migrations.

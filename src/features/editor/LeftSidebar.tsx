@@ -23,7 +23,6 @@ interface LeftSidebarProps {
   onSelect: (id: string) => void;
   onAddScreen: () => void;
   onAddInteraction: () => void;
-  onStubAction: (label: string) => void;
 }
 
 export function LeftSidebar({
@@ -33,7 +32,6 @@ export function LeftSidebar({
   onSelect,
   onAddScreen,
   onAddInteraction,
-  onStubAction,
 }: LeftSidebarProps) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -65,8 +63,8 @@ export function LeftSidebar({
           <button
             aria-label="Collapse flow panel"
             className={styles.iconButton}
-            onClick={() => onStubAction("Panel collapse is coming next")}
-            title="Collapse panel"
+            disabled
+            title="Panel collapse is planned after the MVP"
             type="button"
           >
             <PanelLeftClose aria-hidden="true" size={14} />
@@ -99,7 +97,8 @@ export function LeftSidebar({
         </button>
         <button
           className={styles.quickAdd}
-          onClick={() => onStubAction("Notes will live beside flow nodes")}
+          disabled
+          title="Notes are planned after the MVP"
           type="button"
         >
           <StickyNote aria-hidden="true" size={14} />

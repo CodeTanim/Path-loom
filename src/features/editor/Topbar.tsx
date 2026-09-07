@@ -12,10 +12,12 @@ import { BrandMark } from "./components/BrandMark";
 import styles from "./editor.module.css";
 
 export type EditorMode = "design" | "simulate";
+export type SaveStatus = "saving" | "saved" | "failed";
 
 interface TopbarProps {
   projectLabel?: string;
   flowLabel?: string;
+  saveStatus?: SaveStatus;
   mode: EditorMode;
   issueCount: number;
   coverageOpen: boolean;
@@ -32,6 +34,7 @@ interface TopbarProps {
 export function Topbar({
   projectLabel = "Acme Shop",
   flowLabel = "Checkout recovery",
+  saveStatus = "saved",
   mode,
   issueCount,
   coverageOpen,
@@ -44,6 +47,13 @@ export function Topbar({
   onRun,
   onStop,
 }: TopbarProps) {
+  const saveLabel =
+    saveStatus === "failed"
+      ? "Local save failed"
+      : saveStatus === "saving"
+        ? "Saving locally"
+        : "Saved locally";
+
   return (
     <header className={styles.topbar}>
       <div className={styles.brandGroup}>
@@ -54,9 +64,18 @@ export function Topbar({
           <ChevronRight aria-hidden="true" size={11} />
           <span className={styles.breadcrumbFlow}>{flowLabel}</span>
         </nav>
-        <span className={styles.saveState}>
-          <span aria-hidden="true" className={styles.saveDot} />
-          Saved locally
+        <span aria-live="polite" className={styles.saveState}>
+          <span
+            aria-hidden="true"
+            className={`${styles.saveDot} ${
+              saveStatus === "failed"
+                ? styles.saveDotFailed
+                : saveStatus === "saving"
+                  ? styles.saveDotSaving
+                  : ""
+            }`}
+          />
+          {saveLabel}
         </span>
       </div>
 
@@ -107,7 +126,9 @@ export function Topbar({
         <button
           aria-pressed={coverageOpen}
           className={`${styles.coverageButton} ${coverageOpen ? styles.coverageActive : ""}`}
+          disabled={mode === "simulate"}
           onClick={onToggleCoverage}
+          title={mode === "simulate" ? "Exit simulation to edit coverage" : undefined}
           type="button"
         >
           {issueCount > 0 ? (

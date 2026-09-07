@@ -23,7 +23,6 @@ import {
 import {
   CheckCircle2,
   GitBranch,
-  Hand,
   MousePointer2,
   Monitor,
   Scan,
@@ -34,13 +33,16 @@ import {
 import {
   analyzeProject,
   checkoutProject,
+  parsePathloomDocument,
   type AnalysisIssue,
   type CoreUIStateKind,
   type FlowNode,
+  type FlowNodeKind,
   type Interaction,
   type Outcome,
   type OutcomeKind,
   type ProjectDocument,
+  type UIState,
 } from "@/domain";
 import { Inspector } from "./Inspector";
 import { LeftSidebar } from "./LeftSidebar";
@@ -48,7 +50,7 @@ import {
   SimulationTray,
   type SimulationCursor,
 } from "./SimulationTray";
-import { Topbar, type EditorMode } from "./Topbar";
+import { Topbar, type EditorMode, type SaveStatus } from "./Topbar";
 import { screenNodeTypes } from "./components/FlowNodes";
 import styles from "./editor.module.css";
 import {
@@ -56,6 +58,7 @@ import {
   buildEditorEdges,
   buildEditorNodes,
   interactionNodeId,
+  moveEditorNodeWithDependents,
   preserveNodePositions,
   unresolvedNodeId,
   variantForState,
@@ -88,24 +91,16 @@ interface SimulationState {
   visitedNodeIds: string[];
 }
 
-const isCoreKind = (value: string): value is CoreUIStateKind =>
-  [
-    "idle",
-    "loading",
-    "success",
-    "empty",
-    "error",
-    "offline",
-    "unauthorized",
-  ].includes(value);
-
 const titleCase = (value: string) =>
   value
     .replaceAll("-", " ")
     .replace(/(^|\s)\S/g, (character) => character.toUpperCase());
 
-const entityId = (prefix: string) =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const entityId = (prefix: string) => {
+  const suffix = globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${suffix}`;
+};
 
 function initialSimulation(project: ProjectDocument): SimulationState {
   const entry = project.nodes.find((node) => node.id === project.entryNodeId);
@@ -177,6 +172,8 @@ function issueFocusId(issue: AnalysisIssue) {
       return issue.finding.nodeId;
     case "outcome-state-kind-mismatch":
       return interactionNodeId(issue.mismatch.interactionId);
+    case "missing-outcome":
+      return interactionNodeId(issue.interactionId);
     case "unresolved-branch":
       return unresolvedNodeId(issue.branch.outcomeId);
     case "broken-branch":
@@ -191,11 +188,12 @@ export function PathloomEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(
     interactionNodeId("submit-payment"),
   );
+  const [focusedOutcomeId, setFocusedOutcomeId] = useState<string | null>(null);
   const [mode, setMode] = useState<EditorMode>("design");
   const [coverageOpen, setCoverageOpen] = useState(false);
-  const [previewKinds, setPreviewKinds] = useState<
-    Record<string, CoreUIStateKind>
-  >({ checkout: "idle" });
+  const [previewStateIds, setPreviewStateIds] = useState<Record<string, string>>({
+    checkout: "checkout-idle",
+  });
   const [past, setPast] = useState<EditorSnapshot[]>([]);
   const [future, setFuture] = useState<EditorSnapshot[]>([]);
   const [simulation, setSimulation] = useState<SimulationState>(() =>
@@ -203,6 +201,7 @@ export function PathloomEditor() {
   );
   const [simulationPast, setSimulationPast] = useState<SimulationState[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saving");
 
   const projectRef = useRef(project);
   const nodesRef = useRef(nodes);
@@ -252,8 +251,11 @@ export function PathloomEditor() {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY);
         if (saved) {
-          const parsed = JSON.parse(saved) as ProjectDocument;
-          if (parsed.schemaVersion === 1 && Array.isArray(parsed.nodes)) {
+          const parsed = parsePathloomDocument(saved);
+          if (!parsed) {
+            window.localStorage.removeItem(STORAGE_KEY);
+            showToast("Invalid local draft was cleared; loaded the demo flow");
+          } else {
             const nextAnalysis = analyzeProject(parsed);
             const nextNodes = buildEditorNodes(parsed, nextAnalysis);
             projectRef.current = parsed;
@@ -263,18 +265,27 @@ export function PathloomEditor() {
             setSimulation(initialSimulation(parsed));
           }
         }
+        setSaveStatus("saved");
       } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
+        setSaveStatus("failed");
+        showToast("Local storage is unavailable; edits remain in this tab");
       } finally {
         hydratedRef.current = true;
       }
     }, 0);
     return () => window.clearTimeout(hydrationTimer);
-  }, [setNodes]);
+  }, [setNodes, showToast]);
 
   useEffect(() => {
     if (!hydratedRef.current) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+    let statusTimer: number;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+      statusTimer = window.setTimeout(() => setSaveStatus("saved"), 0);
+    } catch {
+      statusTimer = window.setTimeout(() => setSaveStatus("failed"), 0);
+    }
+    return () => window.clearTimeout(statusTimer);
   }, [project]);
 
   const pushPast = useCallback((snapshot: EditorSnapshot) => {
@@ -307,10 +318,12 @@ export function PathloomEditor() {
         buildEditorNodes(nextProject, nextAnalysis),
         nodesRef.current,
       );
-      projectRef.current = nextProject;
+      const positionedProject = applyNodePositions(nextProject, nextNodes);
+      projectRef.current = positionedProject;
       nodesRef.current = nextNodes;
-      setProject(nextProject);
+      setProject(positionedProject);
       setNodes(nextNodes);
+      setSaveStatus("saving");
       if (message) showToast(message);
       return true;
     },
@@ -349,6 +362,7 @@ export function PathloomEditor() {
 
   const selectAndCenter = useCallback((id: string, closeCoverage = true) => {
     setSelectedId(id);
+    setFocusedOutcomeId(null);
     if (closeCoverage) setCoverageOpen(false);
     window.setTimeout(() => {
       flowRef.current?.fitView({
@@ -363,7 +377,8 @@ export function PathloomEditor() {
   const addScreen = useCallback(
     (position?: { x: number; y: number }) => {
       if (!requireDesignMode()) return;
-      const id = `screen-${Date.now()}`;
+      const id = entityId("screen");
+      const initialStateId = entityId(`${id}-idle`);
       const fallbackPosition = flowRef.current?.screenToFlowPosition({
         x: window.innerWidth * 0.55,
         y: window.innerHeight * 0.5,
@@ -374,15 +389,15 @@ export function PathloomEditor() {
         kind: "screen",
         description: "A new stateful step in this journey.",
         position: position ?? fallbackPosition ?? { x: 940, y: 440 },
-        initialStateId: `${id}-idle`,
-        states: [{ id: `${id}-idle`, name: "Idle", kind: "idle" }],
+        initialStateId,
+        states: [{ id: initialStateId, name: "Idle", kind: "idle" }],
       };
       commitProject(
         { ...projectRef.current, nodes: [...projectRef.current.nodes, node] },
         "Screen added — connect it to make it reachable",
       );
       setSelectedId(id);
-      setPreviewKinds((current) => ({ ...current, [id]: "idle" }));
+      setPreviewStateIds((current) => ({ ...current, [id]: initialStateId }));
     },
     [commitProject, requireDesignMode],
   );
@@ -433,11 +448,12 @@ export function PathloomEditor() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (window.matchMedia("(max-width: 1039px)").matches) return;
       if (
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable
+        target?.closest(
+          "input, textarea, select, button, a, [contenteditable='true']",
+        )
       ) {
         return;
       }
@@ -475,21 +491,95 @@ export function PathloomEditor() {
     [commitProject, requireDesignMode],
   );
 
+  const setEntryNode = useCallback(
+    (nodeId: string) => {
+      if (!requireDesignMode()) return;
+      const current = projectRef.current;
+      const node = current.nodes.find((item) => item.id === nodeId);
+      if (!node || resolveInitialStateId(node) === null) {
+        showToast("Choose a valid initial state before setting the flow start");
+        return;
+      }
+      commitProject({ ...current, entryNodeId: node.id }, "Flow start updated");
+    },
+    [commitProject, requireDesignMode, showToast],
+  );
+
+  const setInitialState = useCallback(
+    (nodeId: string, stateId: string) => {
+      if (!requireDesignMode()) return;
+      const current = projectRef.current;
+      const node = current.nodes.find((item) => item.id === nodeId);
+      const state = node?.states.find((item) => item.id === stateId);
+      if (!node || !state) {
+        showToast("That state no longer exists on this screen");
+        return;
+      }
+      commitProject(
+        {
+          ...current,
+          nodes: current.nodes.map((item) =>
+            item.id === node.id ? { ...item, initialStateId: state.id } : item,
+          ),
+        },
+        `${state.name} is now the initial state`,
+      );
+      setPreviewStateIds((stateIds) => ({
+        ...stateIds,
+        [node.id]: state.id,
+      }));
+    },
+    [commitProject, requireDesignMode, showToast],
+  );
+
+  const setNodeKind = useCallback(
+    (nodeId: string, kind: FlowNodeKind) => {
+      if (!requireDesignMode()) return;
+      const current = projectRef.current;
+      const node = current.nodes.find((item) => item.id === nodeId);
+      if (!node || node.kind === kind) return;
+      if (
+        kind === "terminal" &&
+        current.interactions.some(
+          (interaction) => interaction.sourceNodeId === node.id,
+        )
+      ) {
+        showToast("Remove this screen’s outgoing interactions before ending the flow");
+        return;
+      }
+      commitProject(
+        {
+          ...current,
+          nodes: current.nodes.map((item) =>
+            item.id === node.id ? { ...item, kind } : item,
+          ),
+        },
+        kind === "terminal"
+          ? "Marked as an intentional ending"
+          : `Screen role changed to ${titleCase(kind)}`,
+      );
+    },
+    [commitProject, requireDesignMode, showToast],
+  );
+
   const createState = useCallback(
     (nodeId: string, kind: CoreUIStateKind) => {
       if (!requireDesignMode()) return;
       const node = projectRef.current.nodes.find((item) => item.id === nodeId);
       if (!node || node.states.some((state) => state.kind === kind)) return;
+      const stateId = entityId(`${nodeId}-${kind}`);
       const nextProject: ProjectDocument = {
         ...projectRef.current,
         nodes: projectRef.current.nodes.map((item) =>
           item.id === nodeId
             ? {
                 ...item,
+                initialStateId:
+                  resolveInitialStateId(item) ?? item.states[0]?.id ?? stateId,
                 states: [
                   ...item.states,
                   {
-                    id: `${nodeId}-${kind}-${Date.now()}`,
+                    id: stateId,
                     name: titleCase(kind),
                     kind,
                   },
@@ -499,7 +589,7 @@ export function PathloomEditor() {
         ),
       };
       commitProject(nextProject, `${titleCase(kind)} state created`);
-      setPreviewKinds((current) => ({ ...current, [nodeId]: kind }));
+      setPreviewStateIds((current) => ({ ...current, [nodeId]: stateId }));
     },
     [commitProject, requireDesignMode],
   );
@@ -529,7 +619,7 @@ export function PathloomEditor() {
       const interactionId = entityId("interaction");
       const outcomeId = entityId("outcome");
       const selectedState = sourceNode.states.find(
-        (state) => state.kind === previewKinds[sourceNode.id],
+        (state) => state.id === previewStateIds[sourceNode.id],
       );
       const interaction: Interaction = {
         id: interactionId,
@@ -557,7 +647,7 @@ export function PathloomEditor() {
         setCoverageOpen(false);
       }
     },
-    [commitProject, previewKinds, requireDesignMode, selectedId, showToast],
+    [commitProject, previewStateIds, requireDesignMode, selectedId, showToast],
   );
 
   const addOutcome = useCallback(
@@ -599,12 +689,40 @@ export function PathloomEditor() {
     (
       interactionId: string,
       patch: Partial<
-        Pick<Interaction, "name" | "kind" | "trigger" | "sourceStateId">
+        Pick<
+          Interaction,
+          "name" | "kind" | "trigger" | "sourceNodeId" | "sourceStateId"
+        >
       >,
     ) => {
       if (!requireDesignMode()) return;
       const current = projectRef.current;
-      if (!current.interactions.some((item) => item.id === interactionId)) return;
+      const selectedInteraction = current.interactions.find(
+        (item) => item.id === interactionId,
+      );
+      if (!selectedInteraction) return;
+      if ("sourceNodeId" in patch || "sourceStateId" in patch) {
+        const nextSourceNodeId =
+          patch.sourceNodeId ?? selectedInteraction.sourceNodeId;
+        const nextSource = current.nodes.find(
+          (node) => node.id === nextSourceNodeId,
+        );
+        if (!nextSource || nextSource.kind === "terminal") {
+          showToast("Choose a non-terminal source screen");
+          return;
+        }
+        const nextSourceStateId =
+          patch.sourceStateId === undefined
+            ? selectedInteraction.sourceStateId
+            : patch.sourceStateId;
+        if (
+          nextSourceStateId !== null &&
+          !nextSource.states.some((state) => state.id === nextSourceStateId)
+        ) {
+          showToast("Choose a state that belongs to the source screen");
+          return;
+        }
+      }
       commitProject(
         {
           ...current,
@@ -617,7 +735,7 @@ export function PathloomEditor() {
         "Interaction updated",
       );
     },
-    [commitProject, requireDesignMode],
+    [commitProject, requireDesignMode, showToast],
   );
 
   const updateOutcome = useCallback(
@@ -652,6 +770,13 @@ export function PathloomEditor() {
     (issue: AnalysisIssue) => {
       const id = issueFocusId(issue);
       setSelectedId(id);
+      setFocusedOutcomeId(
+        issue.type === "unresolved-branch" || issue.type === "broken-branch"
+          ? issue.branch.outcomeId
+          : issue.type === "outcome-state-kind-mismatch"
+            ? issue.mismatch.outcomeId
+            : null,
+      );
       window.setTimeout(() => {
         flowRef.current?.fitView({
           nodes: [{ id }],
@@ -732,47 +857,42 @@ export function PathloomEditor() {
         };
         commitProject(nextProject, `${titleCase(outcome.kind)} ending created`);
         setSelectedId(endingNodeId);
-        setPreviewKinds((kinds) => ({
-          ...kinds,
-          [endingNodeId]: targetKind,
+        setPreviewStateIds((stateIds) => ({
+          ...stateIds,
+          [endingNodeId]: endingStateId,
         }));
         return;
       }
 
       if (issue.type === "unreachable-node") {
-        const currentAnalysis = analyzeProject(current);
-        const sourceNode = current.nodes.find(
-          (node) =>
-            node.id !== issue.nodeId &&
-            node.kind !== "terminal" &&
-            currentAnalysis.reachableNodeIds.includes(node.id),
-        );
         const targetNode = current.nodes.find((node) => node.id === issue.nodeId);
-        if (!sourceNode || !targetNode) {
-          showToast("No reachable non-terminal screen can connect this target");
+        if (!targetNode) return;
+        const targetStateId = resolveInitialStateId(targetNode);
+        if (!targetStateId) {
+          setSelectedId(issue.nodeId);
+          setCoverageOpen(false);
+          showToast(
+            `Set a valid initial state on ${targetNode.name} before connecting it`,
+          );
           return;
         }
-        const interaction: Interaction = {
-          id: entityId(`connect-${issue.nodeId}`),
-          name: `Open ${targetNode.name}`,
-          kind: "navigation",
-          trigger: "click",
-          sourceNodeId: sourceNode.id,
-          sourceStateId: null,
-          outcomes: [
-            {
-              id: entityId(`reach-${issue.nodeId}`),
-              name: `Reach ${targetNode.name}`,
-              kind: "alternate",
-              target: { nodeId: targetNode.id, stateId: null },
-            },
-          ],
-        };
-        commitProject(
-          { ...current, interactions: [...current.interactions, interaction] },
-          "Unreachable screen connected",
-        );
+        setPreviewStateIds((stateIds) => ({
+          ...stateIds,
+          [targetNode.id]: targetStateId,
+        }));
         setSelectedId(issue.nodeId);
+        setCoverageOpen(false);
+        window.setTimeout(() => {
+          flowRef.current?.fitView({
+            nodes: [{ id: targetNode.id }],
+            duration: 380,
+            padding: 0.75,
+            maxZoom: 1.05,
+          });
+        }, 0);
+        showToast(
+          `Choose the intended reachable source, then drag its handle to ${targetNode.name}`,
+        );
         return;
       }
 
@@ -832,9 +952,10 @@ export function PathloomEditor() {
           `Outcome now targets ${titleCase(issue.mismatch.expectedStateKind)}`,
         );
         setSelectedId(interactionNodeId(issue.mismatch.interactionId));
-        setPreviewKinds((kinds) => ({
-          ...kinds,
-          [targetNode.id]: issue.mismatch.expectedStateKind,
+        setFocusedOutcomeId(issue.mismatch.outcomeId);
+        setPreviewStateIds((stateIds) => ({
+          ...stateIds,
+          [targetNode.id]: targetStateId,
         }));
         return;
       }
@@ -845,7 +966,85 @@ export function PathloomEditor() {
         return;
       }
 
+      if (issue.type === "missing-outcome") {
+        addOutcome(issue.interactionId);
+        setSelectedId(interactionNodeId(issue.interactionId));
+        setCoverageOpen(false);
+        return;
+      }
+
       if (issue.type === "dead-end") {
+        const hasOutgoingInteraction = current.interactions.some(
+          (interaction) => interaction.sourceNodeId === issue.nodeId,
+        );
+        if (hasOutgoingInteraction) {
+          const sourceNode = current.nodes.find(
+            (node) => node.id === issue.nodeId,
+          );
+          const sourceState = sourceNode?.states.find(
+            (state) => state.id === issue.stateId,
+          );
+          if (!sourceNode || !sourceState) return;
+          const endingNodeId = entityId("ending");
+          const endingStateId = entityId(`${endingNodeId}-state`);
+          const endingInteractionId = entityId("end-journey");
+          const stateIndex = Math.max(
+            sourceNode.states.findIndex((state) => state.id === sourceState.id),
+            0,
+          );
+          const endingNode: FlowNode = {
+            id: endingNodeId,
+            name: `${sourceState.name} ending`,
+            kind: "terminal",
+            description: `An intentional ending reached from ${sourceNode.name} in its ${sourceState.name} state.`,
+            position: {
+              x: sourceNode.position.x + 680,
+              y: sourceNode.position.y + stateIndex * 170,
+            },
+            initialStateId: endingStateId,
+            states: [
+              {
+                id: endingStateId,
+                name: sourceState.name,
+                kind: sourceState.kind,
+              },
+            ],
+          };
+          const endingInteraction: Interaction = {
+            id: endingInteractionId,
+            name: `End after ${sourceState.name}`,
+            kind: "navigation",
+            trigger: "system",
+            position: {
+              x: sourceNode.position.x + 340,
+              y: sourceNode.position.y + stateIndex * 105,
+            },
+            sourceNodeId: sourceNode.id,
+            sourceStateId: sourceState.id,
+            outcomes: [
+              {
+                id: entityId("journey-ended"),
+                name: "Journey ends",
+                kind: "alternate",
+                target: { nodeId: endingNode.id, stateId: endingStateId },
+              },
+            ],
+          };
+          commitProject(
+            {
+              ...current,
+              nodes: [...current.nodes, endingNode],
+              interactions: [...current.interactions, endingInteraction],
+            },
+            `Created an ending for ${sourceState.name}`,
+          );
+          setSelectedId(interactionNodeId(endingInteraction.id));
+          setPreviewStateIds((stateIds) => ({
+            ...stateIds,
+            [endingNode.id]: endingStateId,
+          }));
+          return;
+        }
         commitProject(
           {
             ...current,
@@ -858,17 +1057,55 @@ export function PathloomEditor() {
         return;
       }
 
-      if (issue.type === "missing-entry-node" && current.nodes[0]) {
+      if (issue.type === "missing-entry-node") {
+        const candidate =
+          current.nodes.find((node) => node.id === issue.nodeId) ??
+          current.nodes[0];
+        if (!candidate) {
+          showToast("Add a screen before setting the flow start");
+          return;
+        }
+        const existingInitialStateId = resolveInitialStateId(candidate);
+        const fallbackState = candidate.states[0] ?? {
+          id: entityId(`${candidate.id}-idle`),
+          name: "Idle",
+          kind: "idle" as const,
+        };
         commitProject(
-          { ...current, entryNodeId: current.nodes[0].id },
+          {
+            ...current,
+            entryNodeId: candidate.id,
+            nodes: current.nodes.map((node) =>
+              node.id === candidate.id
+                ? {
+                    ...node,
+                    states:
+                      candidate.states.length > 0
+                        ? candidate.states
+                        : [fallbackState],
+                    initialStateId:
+                      existingInitialStateId ?? fallbackState.id,
+                  }
+                : node,
+            ),
+          },
           "Start screen restored",
         );
+        setSelectedId(candidate.id);
+        return;
+      }
+
+      if (issue.type === "broken-branch") {
+        setSelectedId(interactionNodeId(issue.branch.interactionId));
+        setFocusedOutcomeId(issue.branch.outcomeId);
+        setCoverageOpen(false);
+        showToast("Choose a valid source or target in the interaction editor");
         return;
       }
 
       showToast("Select a replacement target from the canvas");
     },
-    [commitProject, createState, requireDesignMode, showToast],
+    [addOutcome, commitProject, createState, requireDesignMode, showToast],
   );
 
   const connectNodes = useCallback(
@@ -876,13 +1113,26 @@ export function PathloomEditor() {
       if (!requireDesignMode()) return;
       if (!connection.source || !connection.target) return;
       const current = projectRef.current;
-      const targetExists = current.nodes.some(
+      const targetNode = current.nodes.find(
         (node) => node.id === connection.target,
       );
-      if (!targetExists) return;
+      if (!targetNode) return;
+      const targetState =
+        targetNode.states.find(
+          (state) => state.id === previewStateIds[targetNode.id],
+        ) ??
+        targetNode.states.find((state) => state.id === targetNode.initialStateId);
+      if (!targetState) {
+        showToast("Set a valid target state before connecting this screen");
+        return;
+      }
 
       if (connection.source.startsWith("interaction:")) {
         const interactionId = connection.source.replace("interaction:", "");
+        const sourceInteraction = current.interactions.find(
+          (interaction) => interaction.id === interactionId,
+        );
+        if (!sourceInteraction) return;
         const nextProject: ProjectDocument = {
           ...current,
           interactions: current.interactions.map((interaction) =>
@@ -892,10 +1142,13 @@ export function PathloomEditor() {
                   outcomes: [
                     ...interaction.outcomes,
                     {
-                      id: `outcome-${Date.now()}`,
+                      id: entityId("outcome"),
                       name: "New outcome",
                       kind: "alternate",
-                      target: { nodeId: connection.target!, stateId: null },
+                      target: {
+                        nodeId: targetNode.id,
+                        stateId: targetState.id,
+                      },
                     },
                   ],
                 }
@@ -906,23 +1159,31 @@ export function PathloomEditor() {
         return;
       }
 
-      const sourceExists = current.nodes.some(
+      const sourceNode = current.nodes.find(
         (node) => node.id === connection.source,
       );
-      if (!sourceExists) return;
+      if (!sourceNode) return;
+      if (sourceNode.kind === "terminal") {
+        showToast("Intentional endings cannot start new interactions");
+        return;
+      }
+      const sourceState = sourceNode.states.find(
+        (state) => state.id === previewStateIds[sourceNode.id],
+      );
       const interaction: Interaction = {
-        id: `interaction-${Date.now()}`,
+        id: entityId("interaction"),
         name: "Continue",
         kind: "navigation",
         trigger: "click",
         sourceNodeId: connection.source,
-        sourceStateId: null,
+        sourceStateId:
+          sourceState?.id ?? resolveInitialStateId(sourceNode) ?? null,
         outcomes: [
           {
-            id: `outcome-${Date.now()}`,
+            id: entityId("outcome"),
             name: "Next",
             kind: "alternate",
-            target: { nodeId: connection.target, stateId: null },
+            target: { nodeId: targetNode.id, stateId: targetState.id },
           },
         ],
       };
@@ -931,7 +1192,7 @@ export function PathloomEditor() {
         "Screens connected",
       );
     },
-    [commitProject, requireDesignMode],
+    [commitProject, previewStateIds, requireDesignMode, showToast],
   );
 
   const syncPreviewToCursor = useCallback((cursor: SimulationCursor) => {
@@ -940,16 +1201,12 @@ export function PathloomEditor() {
     );
     if (!node) return;
     const state = node.states.find((item) => item.id === cursor.stateId);
-    const kind = state && isCoreKind(state.kind) ? state.kind : undefined;
-
-    setPreviewKinds((current) => {
-      if (kind && current[node.id] === kind) return current;
-      if (!kind && !(node.id in current)) return current;
-      const next = { ...current };
-      if (kind) next[node.id] = kind;
-      else delete next[node.id];
-      return next;
-    });
+    if (!state) return;
+    setPreviewStateIds((current) =>
+      current[node.id] === state.id
+        ? current
+        : { ...current, [node.id]: state.id },
+    );
   }, []);
 
   const runSimulation = useCallback(() => {
@@ -1176,15 +1433,18 @@ export function PathloomEditor() {
     }, 0);
   }, [simulationPast, syncPreviewToCursor]);
 
-  const previewKind = useMemo<CoreUIStateKind>(() => {
+  const previewState = useMemo<UIState | null>(() => {
     const selectedNode = project.nodes.find((node) => node.id === selectedId);
-    if (!selectedNode) return "idle";
+    if (!selectedNode) return null;
+    const selectedPreview = selectedNode.states.find(
+      (state) => state.id === previewStateIds[selectedNode.id],
+    );
+    if (selectedPreview) return selectedPreview;
     const initial = selectedNode.states.find(
       (state) => state.id === selectedNode.initialStateId,
     );
-    if (previewKinds[selectedNode.id]) return previewKinds[selectedNode.id];
-    return initial && isCoreKind(initial.kind) ? initial.kind : "idle";
-  }, [previewKinds, project.nodes, selectedId]);
+    return initial ?? selectedNode.states[0] ?? null;
+  }, [previewStateIds, project.nodes, selectedId]);
 
   const displayNodes = useMemo<Node[]>(() => {
     const interactionId =
@@ -1200,13 +1460,16 @@ export function PathloomEditor() {
     return nodes.map((node) => {
       const data = { ...node.data } as Record<string, unknown>;
       if (node.type === "screen") {
-        const kind = previewKinds[node.id];
-        if (kind) {
+        const projectNode = project.nodes.find((item) => item.id === node.id);
+        const state = projectNode?.states.find(
+          (item) => item.id === previewStateIds[node.id],
+        );
+        if (state) {
           data.variant = variantForState(
-            kind,
+            state.kind,
             data.variant as Parameters<typeof variantForState>[1],
           );
-          data.stateLabel = titleCase(kind);
+          data.stateLabel = state.name;
         }
       }
       if (mode === "simulate") {
@@ -1218,7 +1481,7 @@ export function PathloomEditor() {
       }
       return { ...node, data, selected: node.id === selectedId };
     });
-  }, [mode, nodes, previewKinds, selectedId, simulation]);
+  }, [mode, nodes, previewStateIds, project.nodes, selectedId, simulation]);
 
   const displayEdges = useMemo(() => {
     const edges = buildEditorEdges(project);
@@ -1259,28 +1522,35 @@ export function PathloomEditor() {
       if (
         modeRef.current !== "design" ||
         !before ||
-        !projectRef.current.nodes.some((node) => node.id === draggedNode.id)
+        (!projectRef.current.nodes.some((node) => node.id === draggedNode.id) &&
+          !projectRef.current.interactions.some(
+            (interaction) => interactionNodeId(interaction.id) === draggedNode.id,
+          ))
       ) {
         return;
       }
-      const currentNodes = nodesRef.current.map((node) =>
-        node.id === draggedNode.id
-          ? { ...node, position: { ...draggedNode.position } }
-          : node,
-      );
       const beforeNode = before.nodes.find((node) => node.id === draggedNode.id);
+      if (!beforeNode) return;
       if (
-        beforeNode?.position.x === draggedNode.position.x &&
+        beforeNode.position.x === draggedNode.position.x &&
         beforeNode.position.y === draggedNode.position.y
       ) {
         return;
       }
+      const currentNodes = moveEditorNodeWithDependents(
+        projectRef.current,
+        nodesRef.current,
+        draggedNode.id,
+        draggedNode.position,
+        beforeNode.position,
+      );
       pushPast(before);
       const nextProject = applyNodePositions(projectRef.current, currentNodes);
       nodesRef.current = currentNodes;
       projectRef.current = nextProject;
       setNodes(currentNodes);
       setProject(nextProject);
+      setSaveStatus("saving");
     },
     [pushPast, setNodes],
   );
@@ -1312,6 +1582,16 @@ export function PathloomEditor() {
 
   return (
     <main className={styles.shell}>
+      <section className={styles.viewportGuard} role="status">
+        <span className={styles.viewportGuardIcon}>
+          <Monitor aria-hidden="true" size={24} />
+        </span>
+        <h1>Pathloom needs a wider canvas</h1>
+        <p>
+          Open this editor in a desktop window at least 1040 pixels wide. Your
+          local flow stays saved while you resize.
+        </p>
+      </section>
       <Topbar
         canRedo={mode === "design" && future.length > 0}
         canUndo={mode === "design" && past.length > 0}
@@ -1334,6 +1614,7 @@ export function PathloomEditor() {
         }}
         onUndo={undo}
         projectLabel="Local project"
+        saveStatus={saveStatus}
       />
 
       <LeftSidebar
@@ -1341,7 +1622,6 @@ export function PathloomEditor() {
         onAddInteraction={() => addInteraction()}
         onAddScreen={() => addScreen()}
         onSelect={selectAndCenter}
-        onStubAction={showToast}
         project={project}
         selectedId={selectedId}
       />
@@ -1370,23 +1650,12 @@ export function PathloomEditor() {
 
         {mode === "design" && (
           <div aria-label="Canvas tools" className={styles.canvasToolbar} role="toolbar">
-          <button
-            aria-label="Select"
+          <span
             className={`${styles.toolButton} ${styles.toolActive}`}
-            title="Select (V)"
-            type="button"
+            title="Selection is active"
           >
             <MousePointer2 aria-hidden="true" size={14} />
-          </button>
-          <button
-            aria-label="Hand tool"
-            className={styles.toolButton}
-            onClick={() => showToast("Hold Space and drag anywhere to pan")}
-            title="Hand tool (H)"
-            type="button"
-          >
-            <Hand aria-hidden="true" size={14} />
-          </button>
+          </span>
           <span aria-hidden="true" className={styles.toolbarDivider} />
           <button
             aria-label="Add screen"
@@ -1409,8 +1678,8 @@ export function PathloomEditor() {
           <button
             aria-label="Add text"
             className={styles.toolButton}
-            onClick={() => showToast("Freeform annotations are in the next canvas pass")}
-            title="Add text"
+            disabled
+            title="Freeform text is planned after the MVP"
             type="button"
           >
             <Type aria-hidden="true" size={14} />
@@ -1418,8 +1687,8 @@ export function PathloomEditor() {
           <button
             aria-label="Add shape"
             className={styles.toolButton}
-            onClick={() => showToast("Freeform shapes are in the next canvas pass")}
-            title="Add shape"
+            disabled
+            title="Freeform shapes are planned after the MVP"
             type="button"
           >
             <Square aria-hidden="true" size={14} />
@@ -1450,6 +1719,11 @@ export function PathloomEditor() {
             const interactionId = edge.data?.interactionId;
             if (typeof interactionId === "string") {
               setSelectedId(interactionNodeId(interactionId));
+              setFocusedOutcomeId(
+                typeof edge.data?.outcomeId === "string"
+                  ? edge.data.outcomeId
+                  : null,
+              );
               setCoverageOpen(false);
             }
           }}
@@ -1458,6 +1732,7 @@ export function PathloomEditor() {
           }}
           onNodeClick={(_event, node) => {
             setSelectedId(node.id);
+            setFocusedOutcomeId(null);
             setCoverageOpen(false);
           }}
           onNodeDragStart={handleNodeDragStart}
@@ -1517,23 +1792,30 @@ export function PathloomEditor() {
       <Inspector
         analysis={analysis}
         coverageOpen={coverageOpen}
-        key={selectedId ?? "no-selection"}
+        initialOutcomeId={focusedOutcomeId}
+        key={`${selectedId ?? "no-selection"}:${focusedOutcomeId ?? "default"}`}
         onAddInteraction={addInteraction}
         onAddOutcome={addOutcome}
         onCloseCoverage={() => setCoverageOpen(false)}
         onCreateState={createState}
         onFixIssue={fixIssue}
         onFocusIssue={focusIssue}
-        onPreviewKind={(kind) => {
-          if (!selectedId) return;
-          setPreviewKinds((current) => ({ ...current, [selectedId]: kind }));
+        onPreviewState={(stateId) => {
+          if (!selectedId || mode === "simulate") return;
+          setPreviewStateIds((current) => ({
+            ...current,
+            [selectedId]: stateId,
+          }));
         }}
         onRenameNode={renameNode}
-        onStubAction={showToast}
+        onSetEntryNode={setEntryNode}
+        onSetInitialState={setInitialState}
+        onSetNodeKind={setNodeKind}
         onUpdateInteraction={updateInteraction}
         onUpdateOutcome={updateOutcome}
-        previewKind={previewKind}
+        previewStateId={previewState?.id ?? null}
         project={project}
+        readOnly={mode === "simulate"}
         selectedId={selectedId}
       />
     </main>

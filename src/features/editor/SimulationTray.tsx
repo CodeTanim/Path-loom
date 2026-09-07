@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import {
   ArrowLeft,
   CheckCircle2,
@@ -52,6 +54,7 @@ export function SimulationTray({
   onRestart,
   onExit,
 }: SimulationTrayProps) {
+  const statusHeadingRef = useRef<HTMLHeadingElement>(null);
   const cursorNode = project.nodes.find((node) => node.id === cursor.nodeId);
   const currentNode = cursor.type === "node" ? cursorNode : undefined;
   const currentInteraction =
@@ -125,11 +128,15 @@ export function SimulationTray({
           ? "Unhandled dead end"
           : "Live simulation";
 
+  useEffect(() => {
+    statusHeadingRef.current?.focus();
+  }, [cursor]);
+
   return (
     <section aria-label="Flow simulator" className={styles.simulationTray}>
-      <div className={styles.trayStep}>
+      <div aria-atomic="true" aria-live="polite" className={styles.trayStep}>
         <div className={styles.trayKicker}>{statusLabel}</div>
-        <h3>{title}</h3>
+        <h3 ref={statusHeadingRef} tabIndex={-1}>{title}</h3>
         <p>{detail}</p>
       </div>
 

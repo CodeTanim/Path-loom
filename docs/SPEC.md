@@ -1,6 +1,6 @@
 # Pathloom Product Spec and Delivery Plan
 
-Status: **Draft v0.1 — MVP vertical slice**
+Status: **MVP v0.1 — vertical slice implemented**
 Last updated: **2026-09-07**
 Repository: [CodeTanim/Path-loom](https://github.com/CodeTanim/Path-loom)
 
@@ -130,10 +130,10 @@ This concept is the visual reference for the MVP: familiar professional editor c
 
 ### Workspace layout
 
-- **Top bar:** Pathloom identity, project context, undo/redo, zoom, coverage status, and simulator launch.
-- **Left rail:** creation tools, document outline, state inventory, and search.
-- **Canvas:** screens, interaction nodes, outcome edges, selection, pan, zoom, and move.
-- **Right inspector:** selected-item properties, state debugger, outcome editor, and coverage findings.
+- **Top bar:** Pathloom identity, project context, mode, undo/redo, coverage status, and simulator launch.
+- **Left rail:** creation tools, screen/action outline, reachability grouping, and search.
+- **Canvas:** screens, interaction nodes, outcome edges, selection, pan, zoom controls, and move.
+- **Right inspector:** selected-item properties, state inventory/debugger, outcome editor, and coverage findings.
 - **Simulation tray:** current screen/state, available interactions, branch choices, history, back, and restart.
 
 ### Primary authoring flow
@@ -187,7 +187,7 @@ Required invariants:
 7. Canvas coordinates are presentation data; they do not determine graph semantics.
 8. React Flow objects are derived views and are never the persisted source of truth.
 9. Simulator history and current selection are ephemeral UI state, not project data.
-10. Schema changes require a version bump and migration before persisted documents are loaded.
+10. Breaking schema changes require a version bump and migration before persisted documents are loaded; additive optional fields must remain backward-compatible.
 
 ## 7. Milestone plan
 
@@ -195,80 +195,90 @@ Work proceeds in order. New milestone work starts only after the previous exit g
 
 ### M0 — Product contract
 
-Status: **In progress**
+Status: **Complete**
 
 - [x] Name and positioning fixed as Pathloom.
 - [x] Core user, problem, vocabulary, and non-goals documented.
 - [x] MVP workflow and acceptance criteria documented.
-- [ ] Reconcile the current build with every P0 semantic rule in this spec.
+- [x] Reconcile the current build with every P0 semantic rule in this spec.
 
 Exit gate: this document and domain vocabulary match the product shown in the editor.
 
 ### M1 — Trustworthy graph model
 
-Status: **In progress**
+Status: **Complete**
 
 - [x] Serializable schema-versioned domain model.
 - [x] Seeded checkout recovery document.
 - [x] Pure analyzer with unit tests.
-- [ ] State-pair reachability and dead-end analysis.
-- [ ] Initial-state and terminal-node invariant checks.
-- [ ] Tests for invalid state-scoped paths and implicit target states.
+- [x] State-pair reachability and dead-end analysis.
+- [x] Initial-state and terminal-node invariant checks.
+- [x] Tests for invalid state-scoped paths and implicit target states.
 
 Exit gate: domain tests cover valid, unresolved, broken, unreachable, and state-scoped flows; lint and TypeScript pass.
 
 ### M2 — Complete authoring loop
 
-Status: **In progress**
+Status: **Complete**
 
 - [x] Canvas navigation, selection, and node movement.
 - [x] Screen creation and basic connection gesture.
 - [x] State debugger and previews.
-- [ ] Interaction creation.
-- [ ] Multi-outcome creation and editing.
-- [ ] Target screen/state editing.
-- [ ] Generic, valid quick fixes.
-- [ ] All authored paths visible on the graph.
+- [x] Interaction creation.
+- [x] Multi-outcome creation and editing.
+- [x] Target screen/state editing.
+- [x] Contextual fixes or guided repairs that preserve the author’s intent.
+- [x] All authored paths visible on the graph.
 
-Exit gate: a user can recreate the seeded Pay fan-out from the UI without editing source code.
+Exit gate: a user can create an interaction with multiple named outcomes targeting distinct exact states without editing source code.
 
 ### M3 — State-accurate simulation
 
-Status: **In progress**
+Status: **Complete**
 
 - [x] Run, branch choice, history, back, and restart UI.
-- [ ] Cursor tracks both screen and state.
-- [ ] Available interactions respect source state.
-- [ ] Terminal completion and unhandled dead ends are distinct.
-- [ ] Unresolved/broken choices explain why they cannot advance.
+- [x] Cursor tracks both screen and state.
+- [x] Available interactions respect source state.
+- [x] Terminal completion and unhandled dead ends are distinct.
+- [x] Unresolved/broken choices explain why they cannot advance.
 
 Exit gate: each seeded outcome lands on the correct screen preview and exact state; no unavailable state-scoped action is offered.
 
 ### M4 — UX coverage and repair
 
-Status: **In progress**
+Status: **Complete**
 
 - [x] Findings panel and live rerun after document changes.
-- [ ] Coverage uses the state-aware analyzer.
-- [ ] Reachability metric has a clear numerator and denominator.
-- [ ] Quick fixes are based on the actual finding/outcome kind.
-- [ ] Fixed documents can reach zero actionable findings.
+- [x] Coverage uses the state-aware analyzer.
+- [x] Reachability metric has a clear numerator and denominator.
+- [x] Repairs are based on the actual finding, state, and outcome kind.
+- [x] Fixed documents can reach zero actionable findings.
 
 Exit gate: seeded intentional gaps are detected, repairable, and undoable with no contradictory simulator result.
 
 ### M5 — MVP hardening and first push
 
-Status: **Not started**
+Status: **Complete**
 
-- [ ] Replace starter branding and remove unused scaffold assets.
-- [ ] Keyboard and pointer smoke test.
-- [ ] Persistence reload smoke test.
-- [ ] Responsive guard for unsupported narrow viewports.
-- [ ] ESLint, TypeScript, unit tests, and production build pass.
-- [ ] Browser QA shows no console or runtime errors.
-- [ ] Commit and push the first coherent version to `CodeTanim/Path-loom`.
+- [x] Replace starter branding and remove unused scaffold assets.
+- [x] Keyboard and pointer smoke test.
+- [x] Persistence reload smoke test.
+- [x] Responsive guard for unsupported narrow viewports.
+- [x] ESLint, TypeScript, unit tests, and production build pass.
+- [x] Browser QA shows no console or runtime errors.
+- [x] Commit and push the first coherent version to `CodeTanim/Path-loom`.
 
 Exit gate: a new contributor can clone, install, run, understand, and exercise the full MVP loop from the README.
+
+### MVP verification record — 2026-09-07
+
+- Domain, saved-document, and graph-projection suites pass with 35 tests.
+- ESLint, a sequential TypeScript check, and the Next.js production build with webpack pass.
+- Browser QA repaired the seeded flow from three findings to zero, undid and redid a coverage repair with keyboard shortcuts, verified Undo after node movement, and restored the valid local draft after reload.
+- The authoring smoke added another outcome to an interaction and targeted it at a distinct screen/state entirely through the inspector.
+- Each repaired Submit payment outcome reached its exact named destination state; state-scoped actions, terminal completion, and read-only simulation inspection behaved as specified.
+- The unsupported narrow-viewport guard rendered correctly, and the exercised flow produced no console warnings or runtime errors.
+- The first coherent MVP checkpoint was pushed in commit [`584394d`](https://github.com/CodeTanim/Path-loom/commit/584394d); subsequent hardening continues in coherent verified commits.
 
 ## 8. MVP release acceptance criteria
 

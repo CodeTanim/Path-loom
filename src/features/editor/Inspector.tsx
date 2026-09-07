@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
-  Copy,
   GitBranch,
   MoreHorizontal,
   Plus,
@@ -20,6 +19,7 @@ import {
   CORE_UI_STATE_KINDS,
   type AnalysisIssue,
   type CoreUIStateKind,
+  type FlowNodeKind,
   type Interaction,
   type InteractionKind,
   type InteractionTrigger,
@@ -39,17 +39,25 @@ interface InspectorProps {
   analysis: ProjectAnalysis;
   selectedId: string | null;
   coverageOpen: boolean;
-  previewKind: CoreUIStateKind;
+  initialOutcomeId?: string | null;
+  previewStateId: string | null;
+  readOnly: boolean;
   onCloseCoverage: () => void;
-  onPreviewKind: (kind: CoreUIStateKind) => void;
+  onPreviewState: (stateId: string) => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onCreateState: (nodeId: string, kind: CoreUIStateKind) => void;
+  onSetEntryNode: (nodeId: string) => void;
+  onSetInitialState: (nodeId: string, stateId: string) => void;
+  onSetNodeKind: (nodeId: string, kind: FlowNodeKind) => void;
   onAddInteraction: (sourceNodeId?: string) => void;
   onAddOutcome: (interactionId: string) => string;
   onUpdateInteraction: (
     interactionId: string,
     patch: Partial<
-      Pick<Interaction, "name" | "kind" | "trigger" | "sourceStateId">
+      Pick<
+        Interaction,
+        "name" | "kind" | "trigger" | "sourceNodeId" | "sourceStateId"
+      >
     >,
   ) => void;
   onUpdateOutcome: (
@@ -59,7 +67,6 @@ interface InspectorProps {
   ) => void;
   onFocusIssue: (issue: AnalysisIssue) => void;
   onFixIssue: (issue: AnalysisIssue) => void;
-  onStubAction: (label: string) => void;
 }
 
 const INTERACTION_KINDS: InteractionKind[] = [
@@ -105,6 +112,8 @@ function issueEntityId(issue: AnalysisIssue): string | null {
       return interactionNodeId(issue.branch.interactionId);
     case "outcome-state-kind-mismatch":
       return interactionNodeId(issue.mismatch.interactionId);
+    case "missing-outcome":
+      return interactionNodeId(issue.interactionId);
   }
 }
 
@@ -129,14 +138,24 @@ function issueTitle(issue: AnalysisIssue, project: ProjectDocument) {
       return `${nodeName(issue.nodeId)} is unreachable`;
     case "missing-state":
       return `${nodeName(issue.finding.nodeId)} has no ${titleCase(issue.finding.stateKind)} state`;
-    case "dead-end":
-      return `${nodeName(issue.nodeId)} ends unexpectedly`;
+    case "dead-end": {
+      const node = project.nodes.find((item) => item.id === issue.nodeId);
+      const state = node?.states.find((item) => item.id === issue.stateId);
+      return `${nodeName(issue.nodeId)} · ${state?.name ?? titleCase(issue.stateId)} ends unexpectedly`;
+    }
     case "broken-branch":
-      return `A branch points to missing content`;
+      return issue.branch.reason.startsWith("missing-source") ||
+        issue.branch.reason === "terminal-source-node"
+        ? `${interactionName(issue.branch.interactionId)} has an invalid source`
+        : `${interactionName(issue.branch.interactionId)} has an invalid target`;
     case "outcome-state-kind-mismatch":
       return `${interactionName(issue.mismatch.interactionId)} lands on ${titleCase(issue.mismatch.actualStateKind)} instead of ${titleCase(issue.mismatch.expectedStateKind)}`;
     case "missing-entry-node":
-      return `This flow has no valid start screen`;
+      return issue.reason === "missing-entry-node"
+        ? "This flow has no valid start screen"
+        : `${nodeName(issue.nodeId)} has no valid initial state`;
+    case "missing-outcome":
+      return `${interactionName(issue.interactionId)} has no outcomes`;
   }
 }
 
@@ -151,11 +170,26 @@ function issueDescription(issue: AnalysisIssue) {
     case "dead-end":
       return "Users can arrive here, but no next action or intentional ending is defined.";
     case "broken-branch":
-      return "The linked screen or state was removed and needs a new target.";
+      switch (issue.branch.reason) {
+        case "missing-source-node":
+          return `The source screen “${issue.branch.referencedId}” no longer exists.`;
+        case "missing-source-state":
+          return `The source state “${issue.branch.referencedId}” no longer exists on this action's screen.`;
+        case "terminal-source-node":
+          return "Intentional endings cannot expose outgoing actions. Choose another source.";
+        case "missing-target-node":
+          return `The target screen “${issue.branch.referencedId}” no longer exists.`;
+        case "missing-target-state":
+          return `The target state “${issue.branch.referencedId}” no longer exists.`;
+        case "missing-target-initial-state":
+          return "The target screen needs a valid initial state or an explicit target state.";
+      }
     case "outcome-state-kind-mismatch":
       return `This ${titleCase(issue.mismatch.outcomeKind)} outcome should target the ${titleCase(issue.mismatch.expectedStateKind)} presentation of its screen.`;
     case "missing-entry-node":
       return "Choose a screen where the simulator should begin.";
+    case "missing-outcome":
+      return "The action can run, but no result is defined for the simulator to follow.";
   }
 }
 
@@ -171,17 +205,26 @@ function issueAction(issue: AnalysisIssue, project: ProjectDocument) {
       return `Create ${titleCase(outcome?.kind ?? "target")} ending`;
     }
     case "unreachable-node":
-      return "Connect to flow";
+      return "Choose connection";
     case "missing-state":
       return `Add ${titleCase(issue.finding.stateKind)} state`;
     case "dead-end":
-      return "Add ending";
+      return project.interactions.some(
+        (interaction) => interaction.sourceNodeId === issue.nodeId,
+      )
+        ? "Create state ending"
+        : "Mark screen as ending";
     case "broken-branch":
-      return "Choose target";
+      return issue.branch.reason.startsWith("missing-source") ||
+        issue.branch.reason === "terminal-source-node"
+        ? "Choose source"
+        : "Choose target";
     case "outcome-state-kind-mismatch":
       return `Use ${titleCase(issue.mismatch.expectedStateKind)} state`;
     case "missing-entry-node":
       return "Set start screen";
+    case "missing-outcome":
+      return "Add outcome";
   }
 }
 
@@ -230,7 +273,9 @@ function CoverageInspector({
             <div className={styles.healthLabel}>Reachable</div>
           </div>
           <div className={styles.healthStat}>
-            <div className={styles.healthValue}>{analysis.summary.unresolvedBranches}</div>
+            <div className={styles.healthValue}>
+              {analysis.summary.unresolvedBranches + analysis.summary.missingOutcomes}
+            </div>
             <div className={styles.healthLabel}>Open paths</div>
           </div>
           <div className={styles.healthStat}>
@@ -304,18 +349,22 @@ export function Inspector({
   analysis,
   selectedId,
   coverageOpen,
-  previewKind,
+  initialOutcomeId,
+  previewStateId,
+  readOnly,
   onCloseCoverage,
-  onPreviewKind,
+  onPreviewState,
   onRenameNode,
   onCreateState,
+  onSetEntryNode,
+  onSetInitialState,
+  onSetNodeKind,
   onAddInteraction,
   onAddOutcome,
   onUpdateInteraction,
   onUpdateOutcome,
   onFocusIssue,
   onFixIssue,
-  onStubAction,
 }: InspectorProps) {
   const selectedNode = project.nodes.find((node) => node.id === selectedId);
   const selectedInteraction = project.interactions.find(
@@ -325,17 +374,25 @@ export function Inspector({
     selectedInteraction ? "logic" : "states",
   );
   const [editingOutcomeId, setEditingOutcomeId] = useState<string | null>(
-    () => selectedInteraction?.outcomes[0]?.id ?? null,
+    () =>
+      selectedInteraction?.outcomes.some(
+        (outcome) => outcome.id === initialOutcomeId,
+      )
+        ? initialOutcomeId ?? null
+        : selectedInteraction?.outcomes[0]?.id ?? null,
   );
 
   const selectedPreviewState = selectedNode?.states.find(
-    (state) => state.kind === previewKind,
+    (state) => state.id === previewStateId,
+  );
+  const selectedInitialState = selectedNode?.states.find(
+    (state) => state.id === selectedNode.initialStateId,
   );
   const defaultKind = selectedNode?.states.find(
     (state) => state.id === selectedNode.initialStateId,
   )?.kind;
   const previewVariant = variantForState(
-    previewKind,
+    selectedPreviewState?.kind,
     variantForState(defaultKind, "checkout"),
   );
 
@@ -344,9 +401,24 @@ export function Inspector({
         (interaction) => interaction.sourceNodeId === selectedNode.id,
       )
     : [];
+  const missingCoreStateKinds = selectedNode
+    ? CORE_UI_STATE_KINDS.filter(
+        (kind) => !selectedNode.states.some((state) => state.kind === kind),
+      )
+    : [];
   const sourceNode = selectedInteraction
     ? project.nodes.find((node) => node.id === selectedInteraction.sourceNodeId)
     : undefined;
+  const sourceCanStartInteraction = Boolean(
+    sourceNode && sourceNode.kind !== "terminal",
+  );
+  const sourceStateIsValid = Boolean(
+    selectedInteraction &&
+      (selectedInteraction.sourceStateId === null ||
+        sourceNode?.states.some(
+          (state) => state.id === selectedInteraction.sourceStateId,
+        )),
+  );
   const editingOutcome = selectedInteraction?.outcomes.find(
     (outcome) => outcome.id === editingOutcomeId,
   );
@@ -398,12 +470,13 @@ export function Inspector({
           <h2>{title}</h2>
           <span className={styles.statusPill}>
             <CircleDot aria-hidden="true" size={9} />
-            In flow
+            {readOnly ? "Simulation view" : "In flow"}
           </span>
           <button
             aria-label="More options"
             className={styles.iconButton}
-            onClick={() => onStubAction("More editing actions are coming next")}
+            disabled
+            title="Additional editing actions are planned after the MVP"
             type="button"
           >
             <MoreHorizontal aria-hidden="true" size={15} />
@@ -411,15 +484,14 @@ export function Inspector({
         </div>
       </div>
 
-      <div aria-label="Inspector tabs" className={styles.tabList} role="tablist">
+      <div aria-label="Inspector sections" className={styles.tabList}>
         {(["details", "states", "logic"] as InspectorTab[]).map((tab) => (
           <button
-            aria-selected={activeTab === tab}
+            aria-pressed={activeTab === tab}
             className={`${styles.tabButton} ${activeTab === tab ? styles.tabActive : ""}`}
             disabled={tab === "states" && Boolean(selectedInteraction)}
             key={tab}
             onClick={() => setActiveTab(tab)}
-            role="tab"
             type="button"
           >
             {titleCase(tab)}
@@ -427,7 +499,16 @@ export function Inspector({
         ))}
       </div>
 
+      <fieldset className={styles.inspectorFieldset} disabled={readOnly}>
+        <legend className="sr-only">
+          {readOnly ? "Read-only simulation inspector" : "Design inspector"}
+        </legend>
       <div className={styles.inspectorBody}>
+        {readOnly && (
+          <div className={styles.readOnlyNotice}>
+            Exit simulation to change screens, states, or branches.
+          </div>
+        )}
         {selectedNode && activeTab === "details" && (
           <>
             <div className={styles.field}>
@@ -444,17 +525,83 @@ export function Inspector({
                 key={`${selectedNode.id}-${selectedNode.name}`}
                 onBlur={(event) => {
                   const value = event.target.value.trim();
-                  if (value && value !== selectedNode.name) {
+                  if (!value) {
+                    event.currentTarget.value = selectedNode.name;
+                  } else if (value !== selectedNode.name) {
                     onRenameNode(selectedNode.id, value);
                   }
                 }}
               />
             </div>
+            <div className={styles.editorGrid}>
+              <label className={styles.editorField}>
+                <span>Initial state</span>
+                <select
+                  className={styles.editorSelect}
+                  disabled={selectedNode.states.length === 0}
+                  onChange={(event) =>
+                    onSetInitialState(selectedNode.id, event.target.value)
+                  }
+                  value={selectedInitialState?.id ?? ""}
+                >
+                  {!selectedInitialState && (
+                    <option disabled value="">
+                      {selectedNode.states.length === 0
+                        ? "No states defined"
+                        : "Choose an initial state"}
+                    </option>
+                  )}
+                  {selectedNode.states.map((state) => (
+                    <option key={state.id} value={state.id}>
+                      {state.name} · {titleCase(state.kind)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.editorField}>
+                <span>Screen role</span>
+                <select
+                  className={styles.editorSelect}
+                  onChange={(event) =>
+                    onSetNodeKind(
+                      selectedNode.id,
+                      event.target.value as FlowNodeKind,
+                    )
+                  }
+                  value={selectedNode.kind}
+                >
+                  <option value="screen">Screen</option>
+                  {selectedNode.kind === "decision" && (
+                    <option disabled value="decision">
+                      Decision · reserved
+                    </option>
+                  )}
+                  <option value="terminal">Intentional ending</option>
+                </select>
+              </label>
+            </div>
+            <div className={styles.field}>
+              <div className={styles.fieldValue}>
+                <span>
+                  {project.entryNodeId === selectedNode.id
+                    ? "Flow starts here"
+                    : "Not the flow start"}
+                </span>
+                {project.entryNodeId !== selectedNode.id && (
+                  <button
+                    className={styles.stateAction}
+                    onClick={() => onSetEntryNode(selectedNode.id)}
+                    type="button"
+                  >
+                    Set as start
+                  </button>
+                )}
+              </div>
+            </div>
             <div className={styles.field}>
               <div className={styles.fieldLabel}>Route</div>
               <div className={styles.fieldValue}>
                 <code>/{selectedNode.id}</code>
-                <Copy aria-hidden="true" size={11} />
               </div>
             </div>
             <div className={styles.field}>
@@ -471,7 +618,11 @@ export function Inspector({
             <div className={styles.previewCard}>
               <div className={styles.previewTopline}>
                 <span>State debugger</span>
-                <span>{titleCase(previewKind)}</span>
+                <span>
+                  {selectedPreviewState
+                    ? `${selectedPreviewState.name} · ${titleCase(selectedPreviewState.kind)}`
+                    : "No state selected"}
+                </span>
               </div>
               <ScreenPreview variant={previewVariant} />
             </div>
@@ -479,54 +630,46 @@ export function Inspector({
             <section className={styles.sectionBlock}>
               <h3 className={styles.sectionHeading}>UI states</h3>
               <div className={styles.stateList}>
-                {CORE_UI_STATE_KINDS.map((kind) => {
-                  const state = selectedNode.states.find((item) => item.kind === kind);
-                  const selected = previewKind === kind;
+                {selectedNode.states.map((state) => {
+                  const selected = selectedPreviewState?.id === state.id;
+                  const initial = selectedNode.initialStateId === state.id;
                   return (
                     <button
+                      aria-pressed={selected}
                       className={`${styles.stateRow} ${selected ? styles.stateSelected : ""}`}
-                      key={kind}
-                      onClick={() => onPreviewKind(kind)}
+                      key={state.id}
+                      onClick={() => onPreviewState(state.id)}
                       type="button"
                     >
                       <span className={styles.stateIcon}>
-                        {state ? (
-                          <Check aria-hidden="true" size={10} />
-                        ) : (
-                          <Plus aria-hidden="true" size={10} />
-                        )}
+                        <Check aria-hidden="true" size={10} />
                       </span>
-                      <span className={styles.stateName}>{titleCase(kind)}</span>
-                      <span
-                        className={`${styles.stateStatus} ${state ? "" : styles.stateMissing}`}
-                      >
-                        {state ? "Defined" : "Missing"}
+                      <span className={styles.stateName}>{state.name}</span>
+                      <span className={styles.stateStatus}>
+                        {titleCase(state.kind)}{initial ? " · Initial" : ""}
                       </span>
                     </button>
                   );
                 })}
               </div>
-              <div className={styles.actionRow}>
-                {!selectedPreviewState && (
+              {missingCoreStateKinds.length > 0 && (
+                <div className={styles.missingStates}>
+                  <div className={styles.fieldLabel}>Add core state</div>
+                  <div className={styles.stateSuggestions}>
+                    {missingCoreStateKinds.map((kind) => (
                   <button
                     className={styles.stateAction}
-                    onClick={() => onCreateState(selectedNode.id, previewKind)}
+                        key={kind}
+                        onClick={() => onCreateState(selectedNode.id, kind)}
                     type="button"
                   >
                     <Plus aria-hidden="true" size={10} />
-                    Create {titleCase(previewKind)} state
+                        {titleCase(kind)}
                   </button>
-                )}
-                <button
-                  aria-label="Duplicate state"
-                  className={styles.miniAction}
-                  onClick={() => onStubAction("State duplication is queued for the full editor")}
-                  title="Duplicate from another state"
-                  type="button"
-                >
-                  <Copy aria-hidden="true" size={11} />
-                </button>
-              </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           </>
         )}
@@ -597,7 +740,9 @@ export function Inspector({
                   key={`${selectedInteraction.id}-${selectedInteraction.name}`}
                   onBlur={(event) => {
                     const name = event.target.value.trim();
-                    if (name && name !== selectedInteraction.name) {
+                    if (!name) {
+                      event.currentTarget.value = selectedInteraction.name;
+                    } else if (name !== selectedInteraction.name) {
                       onUpdateInteraction(selectedInteraction.id, { name });
                     }
                   }}
@@ -622,16 +767,52 @@ export function Inspector({
                 </select>
               </label>
               <label className={styles.editorField}>
+                <span>Source screen</span>
+                <select
+                  className={styles.editorSelect}
+                  onChange={(event) =>
+                    onUpdateInteraction(selectedInteraction.id, {
+                      sourceNodeId: event.target.value,
+                      sourceStateId: null,
+                    })
+                  }
+                  value={sourceCanStartInteraction ? sourceNode?.id : sourceNode?.id ?? ""}
+                >
+                  {!sourceCanStartInteraction && (
+                    <option disabled value={sourceNode?.id ?? ""}>
+                      {sourceNode ? "Terminal source · choose another" : "Missing source · choose one"}
+                    </option>
+                  )}
+                  {project.nodes
+                    .filter((node) => node.kind !== "terminal")
+                    .map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {node.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className={styles.editorField}>
                 <span>Source state</span>
                 <select
                   className={styles.editorSelect}
+                  disabled={!sourceCanStartInteraction}
                   onChange={(event) =>
                     onUpdateInteraction(selectedInteraction.id, {
                       sourceStateId: event.target.value || null,
                     })
                   }
-                  value={selectedInteraction.sourceStateId ?? ""}
+                  value={
+                    sourceStateIsValid
+                      ? selectedInteraction.sourceStateId ?? ""
+                      : "__invalid__"
+                  }
                 >
+                  {!sourceStateIsValid && (
+                    <option disabled value="__invalid__">
+                      Missing state · choose another
+                    </option>
+                  )}
                   <option value="">All states</option>
                   {sourceNode?.states.map((state) => (
                     <option key={state.id} value={state.id}>
@@ -688,7 +869,6 @@ export function Inspector({
                       onClick={() => setEditingOutcomeId(outcome.id)}
                       type="button"
                     >
-                      <span aria-hidden="true" className={styles.dragDots}>⠿</span>
                       <span
                         aria-hidden="true"
                         className={styles.semanticDot}
@@ -720,7 +900,9 @@ export function Inspector({
                         key={`${editingOutcome.id}-${editingOutcome.name}`}
                         onBlur={(event) => {
                           const name = event.target.value.trim();
-                          if (name && name !== editingOutcome.name) {
+                          if (!name) {
+                            event.currentTarget.value = editingOutcome.name;
+                          } else if (name !== editingOutcome.name) {
                             onUpdateOutcome(
                               selectedInteraction.id,
                               editingOutcome.id,
@@ -768,9 +950,18 @@ export function Inspector({
                             },
                           );
                         }}
-                        value={editingOutcome.target?.nodeId ?? ""}
+                        value={
+                          editingOutcome.target
+                            ? editingTargetNode?.id ?? editingOutcome.target.nodeId
+                            : ""
+                        }
                       >
                         <option value="">Unresolved</option>
+                        {editingOutcome.target && !editingTargetNode && (
+                          <option disabled value={editingOutcome.target.nodeId}>
+                            Missing target · choose another
+                          </option>
+                        )}
                         {project.nodes.map((node) => (
                           <option key={node.id} value={node.id}>
                             {node.name}
@@ -792,16 +983,40 @@ export function Inspector({
                               target: {
                                 nodeId: editingTargetNode.id,
                                 stateId:
-                                  event.target.value === "__initial__"
+                                  event.target.value === ""
                                     ? null
                                     : event.target.value,
                               },
                             },
                           );
                         }}
-                        value={editingOutcome.target?.stateId ?? "__initial__"}
+                        value={
+                          !editingOutcome.target
+                            ? ""
+                            : editingOutcome.target.stateId === null
+                            ? ""
+                            : editingTargetNode?.states.some(
+                                  (state) =>
+                                    state.id === editingOutcome.target?.stateId,
+                                )
+                              ? editingOutcome.target?.stateId
+                              : editingOutcome.target.stateId
+                        }
                       >
-                        <option value="__initial__">
+                        {editingOutcome.target?.stateId !== null &&
+                          editingTargetNode &&
+                          !editingTargetNode.states.some(
+                            (state) =>
+                              state.id === editingOutcome.target?.stateId,
+                          ) && (
+                            <option
+                              disabled
+                              value={editingOutcome.target?.stateId ?? ""}
+                            >
+                              Missing state · choose another
+                            </option>
+                          )}
+                        <option value="">
                           Initial state
                           {editingTargetNode
                             ? ` · ${
@@ -839,6 +1054,7 @@ export function Inspector({
           </>
         )}
       </div>
+      </fieldset>
     </aside>
   );
 }
