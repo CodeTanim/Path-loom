@@ -287,10 +287,11 @@ export function EditableEdge({
     if (!keyboardDirtyRef.current) return;
     keyboardDirtyRef.current = false;
     const nextRoute = canonicalRoute(routeRef.current);
+    const previousRoute = keyboardStartRef.current;
     routeRef.current = nextRoute;
     keyboardStartRef.current = nextRoute;
     setDraftRoute(null);
-    if (!sameRoute(nextRoute, keyboardStartRef.current)) {
+    if (!sameRoute(nextRoute, previousRoute)) {
       data?.onRouteCommit?.(id, nextRoute);
     }
     button?.blur();
