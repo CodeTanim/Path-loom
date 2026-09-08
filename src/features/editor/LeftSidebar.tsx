@@ -1,78 +1,63 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  CircleDashed,
-  GitBranch,
-  Monitor,
-  MousePointerClick,
-  PanelLeftClose,
-  Plus,
-  Search,
-  StickyNote,
-} from "lucide-react";
+import { useState } from "react";
+import { Monitor, MousePointerClick, Plus, Search } from "lucide-react";
 
 import type { ProjectAnalysis, ProjectDocument } from "@/domain";
 import { interactionNodeId } from "./graph";
 import styles from "./editor.module.css";
+import shellStyles from "./shell-controls.module.css";
 
 interface LeftSidebarProps {
   project: ProjectDocument;
   analysis: ProjectAnalysis;
   selectedId: string | null;
+  readOnly?: boolean;
   onSelect: (id: string) => void;
   onAddScreen: () => void;
   onAddInteraction: () => void;
+  onLoadExample?: () => void;
 }
 
 export function LeftSidebar({
   project,
-  analysis,
   selectedId,
+  readOnly = false,
   onSelect,
   onAddScreen,
-  onAddInteraction,
+  onLoadExample,
 }: LeftSidebarProps) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const unreachable = new Set(analysis.unreachableNodeIds);
-
-  const visibleNodes = useMemo(
-    () =>
-      project.nodes.filter((node) =>
-        node.name.toLocaleLowerCase().includes(normalizedQuery),
-      ),
-    [normalizedQuery, project.nodes],
-  );
-  const visibleInteractions = useMemo(
-    () =>
-      project.interactions.filter((interaction) =>
-        interaction.name.toLocaleLowerCase().includes(normalizedQuery),
-      ),
-    [normalizedQuery, project.interactions],
-  );
-
-  const itemClass = (active: boolean) =>
-    `${styles.outlineItem} ${active ? styles.outlineItemActive : ""}`;
+  const screenGroups = project.nodes.flatMap((node) => {
+    const matchesScreen = node.name.toLocaleLowerCase().includes(normalizedQuery);
+    const actions = project.interactions.filter(
+      (action) =>
+        action.sourceNodeId === node.id &&
+        (matchesScreen || action.name.toLocaleLowerCase().includes(normalizedQuery)),
+    );
+    return matchesScreen || actions.length > 0 ? [{ node, actions }] : [];
+  });
 
   return (
-    <aside className={styles.leftPanel}>
-      <div className={styles.panelHeader}>
-        <div className={styles.sectionTitle}>
-          <h2>Flow</h2>
-          <button
-            aria-label="Collapse flow panel"
-            className={styles.iconButton}
-            disabled
-            title="Panel collapse is planned after the MVP"
-            type="button"
-          >
-            <PanelLeftClose aria-hidden="true" size={14} />
-          </button>
+    <aside aria-label="Flow outline" className={styles.leftPanel}>
+      <div className={shellStyles.sidebarHeader}>
+        <div className={shellStyles.sidebarTitle}>
+          <h2>Screens</h2>
+          <span>{project.nodes.length}</span>
         </div>
+        <button
+          className={`${styles.primaryButton} ${shellStyles.addScreen}`}
+          disabled={readOnly}
+          onClick={onAddScreen}
+          type="button"
+        >
+          <Plus aria-hidden="true" size={14} />
+          Add screen
+        </button>
         <label className={styles.searchBox}>
           <Search aria-hidden="true" size={12} />
-          <span className={styles.srOnly}>Search flow</span>
+          <span className={styles.srOnly}>Search screens and actions</span>
           <input
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Find a screen or action"
@@ -82,122 +67,76 @@ export function LeftSidebar({
         </label>
       </div>
 
-      <div className={styles.quickAdds}>
-        <button className={styles.quickAdd} onClick={onAddScreen} type="button">
-          <Monitor aria-hidden="true" size={14} />
-          <span>Screen</span>
-        </button>
-        <button
-          className={styles.quickAdd}
-          onClick={onAddInteraction}
-          type="button"
-        >
-          <GitBranch aria-hidden="true" size={14} />
-          <span>Interaction</span>
-        </button>
-        <button
-          className={styles.quickAdd}
-          disabled
-          title="Notes are planned after the MVP"
-          type="button"
-        >
-          <StickyNote aria-hidden="true" size={14} />
-          <span>Note</span>
-        </button>
-      </div>
-
-      <div className={styles.outline}>
-        <section className={styles.outlineGroup}>
-          <div className={styles.outlineLabel}>Screens</div>
-          {visibleNodes
-            .filter((node) => !unreachable.has(node.id))
-            .map((node) => (
-              <button
-                className={itemClass(selectedId === node.id)}
-                key={node.id}
-                onClick={() => onSelect(node.id)}
-                type="button"
-              >
-                <span className={styles.outlineIcon}>
-                  <Monitor aria-hidden="true" size={11} />
+      <nav aria-label="Screens and their actions" className={shellStyles.screenList}>
+        {screenGroups.map(({ node, actions }) => (
+          <div className={shellStyles.screenGroup} key={node.id}>
+            <button
+              aria-pressed={selectedId === node.id}
+              className={`${shellStyles.screenItem} ${selectedId === node.id ? shellStyles.selectedItem : ""}`}
+              onClick={() => onSelect(node.id)}
+              type="button"
+            >
+              <Monitor aria-hidden="true" size={14} />
+              <span className={shellStyles.itemCopy}>
+                <span className={shellStyles.itemName}>{node.name}</span>
+                <span className={shellStyles.itemDetail}>
+                  {node.states.length} {node.states.length === 1 ? "state" : "states"}
                 </span>
-                <span className={styles.outlineName}>{node.name}</span>
-                <span className={styles.outlineMeta}>{node.states.length}</span>
-              </button>
-            ))}
-        </section>
-
-        <section className={styles.outlineGroup}>
-          <div className={styles.outlineLabel}>Interactions</div>
-          {visibleInteractions.map((interaction) => {
-            const id = interactionNodeId(interaction.id);
-            return (
-              <button
-                className={itemClass(selectedId === id)}
-                key={interaction.id}
-                onClick={() => onSelect(id)}
-                type="button"
-              >
-                <span className={styles.outlineIcon}>
-                  <MousePointerClick aria-hidden="true" size={11} />
-                </span>
-                <span className={styles.outlineName}>{interaction.name}</span>
-                <span className={styles.outlineMeta}>
-                  {interaction.outcomes.length}
-                </span>
-              </button>
-            );
-          })}
-        </section>
-
-        {analysis.unreachableNodeIds.length > 0 && (
-          <section className={styles.outlineGroup}>
-            <div className={styles.outlineLabel}>Unreachable</div>
-            {visibleNodes
-              .filter((node) => unreachable.has(node.id))
-              .map((node) => (
-                <button
-                  className={itemClass(selectedId === node.id)}
-                  key={node.id}
-                  onClick={() => onSelect(node.id)}
-                  type="button"
-                >
-                  <span className={styles.outlineIcon}>
-                    <CircleDashed aria-hidden="true" size={11} />
-                  </span>
-                  <span className={styles.outlineName}>{node.name}</span>
-                  <span aria-label="Coverage warning" className={styles.warningDot} />
-                </button>
-              ))}
-          </section>
-        )}
-
-        {visibleNodes.length === 0 && visibleInteractions.length === 0 && (
-          <div className={styles.emptyState}>
-            No flow items match “{query}”.
+              </span>
+              {project.entryNodeId === node.id && (
+                <span className={shellStyles.startBadge}>Start</span>
+              )}
+            </button>
+            {actions.length > 0 && (
+              <div className={shellStyles.nestedActions}>
+                {actions.map((action) => {
+                  const id = interactionNodeId(action.id);
+                  return (
+                    <button
+                      aria-pressed={selectedId === id}
+                      className={`${shellStyles.actionItem} ${selectedId === id ? shellStyles.selectedItem : ""}`}
+                      key={action.id}
+                      onClick={() => onSelect(id)}
+                      title={`${action.name} · ${action.outcomes.length} ${action.outcomes.length === 1 ? "outcome" : "outcomes"}`}
+                      type="button"
+                    >
+                      <MousePointerClick aria-hidden="true" size={12} />
+                      <span className={shellStyles.itemName}>{action.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        ))}
 
-      <div className={styles.shortcutFooter}>
-        <span>
-          Pan <kbd>Space</kbd>
-        </span>
-        <span>
-          Add <kbd>N</kbd>
-        </span>
-        <span>
-          Undo <kbd>⌘Z</kbd>
-        </span>
-        <button
-          aria-label="Add screen"
-          className={styles.iconButton}
-          onClick={onAddScreen}
-          title="Add screen"
-          type="button"
-        >
-          <Plus aria-hidden="true" size={13} />
-        </button>
+        {screenGroups.length === 0 && (
+          <p className={shellStyles.emptyList}>
+            {normalizedQuery
+              ? `No screens or actions match “${query}”.`
+              : "Add your first screen to start a flow."}
+          </p>
+        )}
+      </nav>
+
+      <div className={shellStyles.guide}>
+        <p>Build one path at a time</p>
+        <ol>
+          <li>Add screens</li>
+          <li>Add actions &amp; outcomes</li>
+          <li>Preview each path</li>
+        </ol>
+        {onLoadExample && (
+          <button
+            className={shellStyles.exampleButton}
+            disabled={readOnly}
+            onClick={onLoadExample}
+            type="button"
+          >
+            Load example
+          </button>
+        )}
+        <small>Your flow saves automatically in this browser. It is not synced across devices.</small>
       </div>
     </aside>
   );

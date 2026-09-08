@@ -19,6 +19,42 @@ describe("Pathloom document validation", () => {
     );
   });
 
+  it("round-trips optional incoming and outcome route hints", () => {
+    const document = cloneCheckoutProject();
+    document.interactions[0].incomingRoute = {
+      bendOffset: { x: 40, y: -25 },
+    };
+    document.interactions[0].outcomes[0].route = {
+      bendOffset: { x: -30, y: 65 },
+    };
+
+    expect(parsePathloomDocument(JSON.stringify(document))).toEqual(document);
+  });
+
+  it("rejects malformed route hints", () => {
+    const invalidIncoming = cloneCheckoutProject();
+    invalidIncoming.interactions[0].incomingRoute = {
+      bendOffset: { x: Number.NaN, y: 0 },
+    };
+    expect(isPathloomDocument(invalidIncoming)).toBe(false);
+
+    const invalidOutcome = cloneCheckoutProject();
+    invalidOutcome.interactions[0].outcomes[0].route = {
+      bendOffset: { x: 0, y: Number.POSITIVE_INFINITY },
+    };
+    expect(isPathloomDocument(invalidOutcome)).toBe(false);
+
+    const missingCoordinate = cloneCheckoutProject() as unknown as Record<
+      string,
+      unknown
+    >;
+    const interactions = missingCoordinate.interactions as Array<
+      Record<string, unknown>
+    >;
+    interactions[0].incomingRoute = { bendOffset: { x: 10 } };
+    expect(isPathloomDocument(missingCoordinate)).toBe(false);
+  });
+
   it("rejects malformed JSON and unsupported schema versions", () => {
     expect(parsePathloomDocument("{not-json")).toBeNull();
     expect(

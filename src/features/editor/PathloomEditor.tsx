@@ -14,8 +14,8 @@ import {
   ReactFlow,
   useNodesState,
   type Connection,
-  type Edge,
   type Node,
+  type OnEdgesChange,
   type OnNodeDrag,
   type OnNodesChange,
   type ReactFlowInstance,
@@ -23,16 +23,11 @@ import {
 import {
   CheckCircle2,
   GitBranch,
-  MousePointer2,
-  Monitor,
   Scan,
-  Square,
-  Type,
 } from "lucide-react";
 
 import {
   analyzeProject,
-  checkoutProject,
   parsePathloomDocument,
   type AnalysisIssue,
   type CoreUIStateKind,
@@ -44,14 +39,22 @@ import {
   type ProjectDocument,
   type UIState,
 } from "@/domain";
+import { starterProject } from "@/domain/samples/starter";
+import { freeScreenPosition, removeUnusedState } from "./authoring";
 import { Inspector } from "./Inspector";
 import { LeftSidebar } from "./LeftSidebar";
 import {
   SimulationTray,
   type SimulationCursor,
 } from "./SimulationTray";
+import { SimulationViewport, simulationFocusId } from "./SimulationViewport";
 import { Topbar, type EditorMode, type SaveStatus } from "./Topbar";
 import { screenNodeTypes } from "./components/FlowNodes";
+import {
+  pathloomEdgeTypes,
+  type PathloomEdge,
+  type RouteCommit,
+} from "./components/EditableEdge";
 import styles from "./editor.module.css";
 import {
   applyNodePositions,
@@ -75,8 +78,8 @@ const OUTCOME_TARGET_KINDS: Partial<Record<OutcomeKind, CoreUIStateKind>> = {
   unauthorized: "unauthorized",
 };
 
-const initialAnalysis = analyzeProject(checkoutProject);
-const initialNodes = buildEditorNodes(checkoutProject, initialAnalysis);
+const initialAnalysis = analyzeProject(starterProject);
+const initialNodes = buildEditorNodes(starterProject, initialAnalysis);
 
 interface EditorSnapshot {
   project: ProjectDocument;
@@ -182,12 +185,13 @@ function issueFocusId(issue: AnalysisIssue) {
 }
 
 export function PathloomEditor() {
-  const [project, setProject] = useState<ProjectDocument>(checkoutProject);
+  const [project, setProject] = useState<ProjectDocument>(starterProject);
   const analysis = useMemo(() => analyzeProject(project), [project]);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [selectedId, setSelectedId] = useState<string | null>(
-    interactionNodeId("submit-payment"),
+    starterProject.entryNodeId,
   );
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [focusedOutcomeId, setFocusedOutcomeId] = useState<string | null>(null);
   const [mode, setMode] = useState<EditorMode>("design");
   const [coverageOpen, setCoverageOpen] = useState(false);
@@ -197,7 +201,7 @@ export function PathloomEditor() {
   const [past, setPast] = useState<EditorSnapshot[]>([]);
   const [future, setFuture] = useState<EditorSnapshot[]>([]);
   const [simulation, setSimulation] = useState<SimulationState>(() =>
-    initialSimulation(checkoutProject),
+    initialSimulation(starterProject),
   );
   const [simulationPast, setSimulationPast] = useState<SimulationState[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -206,7 +210,7 @@ export function PathloomEditor() {
   const projectRef = useRef(project);
   const nodesRef = useRef(nodes);
   const modeRef = useRef(mode);
-  const flowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const flowRef = useRef<ReactFlowInstance<Node, PathloomEdge> | null>(null);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const hydratedRef = useRef(false);
@@ -255,14 +259,18 @@ export function PathloomEditor() {
           if (!parsed) {
             window.localStorage.removeItem(STORAGE_KEY);
             showToast("Invalid local draft was cleared; loaded the demo flow");
-          } else {
+          } else if (
+            JSON.stringify(parsed) !== JSON.stringify(projectRef.current)
+          ) {
             const nextAnalysis = analyzeProject(parsed);
             const nextNodes = buildEditorNodes(parsed, nextAnalysis);
             projectRef.current = parsed;
             nodesRef.current = nextNodes;
             setProject(parsed);
             setNodes(nextNodes);
+            setSelectedId(parsed.entryNodeId);
             setSimulation(initialSimulation(parsed));
+            window.setTimeout(() => flowRef.current?.fitView({ padding: 0.15, maxZoom: 0.95 }), 80);
           }
         }
         setSaveStatus("saved");
@@ -300,12 +308,13 @@ export function PathloomEditor() {
       setProject(snapshot.project);
       setNodes(cloneNodes(snapshot.nodes));
       setSelectedId(snapshot.selectedId);
+      setSelectedEdgeId(null);
     },
     [setNodes],
   );
 
   const commitProject = useCallback(
-    (nextProject: ProjectDocument, message?: string) => {
+    (nextProject: ProjectDocument, message?: string, resetPositions = false) => {
       if (!requireDesignMode()) return false;
       const before = {
         project: projectRef.current,
@@ -314,10 +323,9 @@ export function PathloomEditor() {
       };
       pushPast(before);
       const nextAnalysis = analyzeProject(nextProject);
-      const nextNodes = preserveNodePositions(
-        buildEditorNodes(nextProject, nextAnalysis),
-        nodesRef.current,
-      );
+      const nextNodes = resetPositions
+        ? buildEditorNodes(nextProject, nextAnalysis)
+        : preserveNodePositions(buildEditorNodes(nextProject, nextAnalysis), nodesRef.current);
       const positionedProject = applyNodePositions(nextProject, nextNodes);
       projectRef.current = positionedProject;
       nodesRef.current = nextNodes;
@@ -329,6 +337,70 @@ export function PathloomEditor() {
     },
     [pushPast, requireDesignMode, selectedId, setNodes, showToast],
   );
+
+  const commitEdgeRoute = useCallback<RouteCommit>(
+    (edgeId, route) => {
+      if (!requireDesignMode()) return;
+      const current = projectRef.current;
+      let changed = false;
+      const nextInteractions = current.interactions.map((interaction) => {
+        if (edgeId === `edge:into:${interaction.id}`) {
+          changed = true;
+          return { ...interaction, incomingRoute: route };
+        }
+        const outcomeId = edgeId.startsWith("edge:")
+          ? edgeId.slice("edge:".length)
+          : null;
+        if (!outcomeId) return interaction;
+        const ownsOutcome = interaction.outcomes.some(
+          (outcome) => outcome.id === outcomeId,
+        );
+        if (!ownsOutcome) return interaction;
+        changed = true;
+        return {
+          ...interaction,
+          outcomes: interaction.outcomes.map((outcome) =>
+            outcome.id === outcomeId ? { ...outcome, route } : outcome,
+          ),
+        };
+      });
+      if (!changed) return;
+      commitProject(
+        { ...current, interactions: nextInteractions },
+        route ? "Arrow route updated" : "Arrow route reset",
+      );
+    },
+    [commitProject, requireDesignMode],
+  );
+
+  const selectEdge = useCallback((edgeId: string) => {
+    const current = projectRef.current;
+    const incomingOwner = current.interactions.find(
+      (interaction) => edgeId === `edge:into:${interaction.id}`,
+    );
+    const outcomeOwner = incomingOwner
+      ? null
+      : current.interactions.find((interaction) =>
+          interaction.outcomes.some(
+            (outcome) => edgeId === `edge:${outcome.id}`,
+          ),
+        );
+    const owner = incomingOwner ?? outcomeOwner;
+    if (!owner) {
+      setSelectedEdgeId(null);
+      return;
+    }
+    setSelectedEdgeId(edgeId);
+    setSelectedId(interactionNodeId(owner.id));
+    setFocusedOutcomeId(
+      incomingOwner
+        ? null
+        : owner.outcomes.find(
+            (outcome) => edgeId === `edge:${outcome.id}`,
+          )?.id ?? null,
+    );
+    setCoverageOpen(false);
+  }, []);
 
   const undo = useCallback(() => {
     if (!requireDesignMode()) return;
@@ -362,6 +434,7 @@ export function PathloomEditor() {
 
   const selectAndCenter = useCallback((id: string, closeCoverage = true) => {
     setSelectedId(id);
+    setSelectedEdgeId(null);
     setFocusedOutcomeId(null);
     if (closeCoverage) setCoverageOpen(false);
     window.setTimeout(() => {
@@ -373,6 +446,17 @@ export function PathloomEditor() {
       });
     }, 0);
   }, []);
+
+  const loadExample = useCallback(() => {
+    if (!requireDesignMode()) return;
+    if (!window.confirm("Replace this flow with the payment example? You can Undo this change before closing the tab.")) return;
+    commitProject(structuredClone(starterProject), "Example loaded — Undo restores your previous flow", true);
+    setSelectedId(starterProject.entryNodeId);
+    setSelectedEdgeId(null);
+    setPreviewStateIds({});
+    setCoverageOpen(false);
+    window.setTimeout(() => flowRef.current?.fitView({ padding: 0.15, maxZoom: 0.95, duration: 300 }), 80);
+  }, [commitProject, requireDesignMode]);
 
   const addScreen = useCallback(
     (position?: { x: number; y: number }) => {
@@ -387,17 +471,17 @@ export function PathloomEditor() {
         id,
         name: "Untitled screen",
         kind: "screen",
-        description: "A new stateful step in this journey.",
-        position: position ?? fallbackPosition ?? { x: 940, y: 440 },
+        position: freeScreenPosition(nodesRef.current, position ?? fallbackPosition ?? { x: 40, y: 440 }),
         initialStateId,
         states: [{ id: initialStateId, name: "Idle", kind: "idle" }],
       };
       commitProject(
         { ...projectRef.current, nodes: [...projectRef.current.nodes, node] },
-        "Screen added — connect it to make it reachable",
+        "Screen added — name it, then add an action",
       );
       setSelectedId(id);
       setPreviewStateIds((current) => ({ ...current, [id]: initialStateId }));
+      window.setTimeout(() => flowRef.current?.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1, duration: 300 }), 80);
     },
     [commitProject, requireDesignMode],
   );
@@ -408,7 +492,7 @@ export function PathloomEditor() {
     const currentProject = projectRef.current;
 
     if (selectedId === currentProject.entryNodeId) {
-      showToast("The start screen cannot be deleted");
+      showToast("Choose another screen as the flow start before deleting this one");
       return;
     }
 
@@ -422,6 +506,7 @@ export function PathloomEditor() {
       };
       commitProject(nextProject, "Interaction removed");
       setSelectedId(null);
+      setSelectedEdgeId(null);
       return;
     }
 
@@ -437,7 +522,7 @@ export function PathloomEditor() {
           ...interaction,
           outcomes: interaction.outcomes.map((outcome) =>
             outcome.target?.nodeId === selectedId
-              ? { ...outcome, target: null }
+              ? { ...outcome, target: null, route: undefined }
               : outcome,
           ),
         })),
@@ -449,7 +534,6 @@ export function PathloomEditor() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (window.matchMedia("(max-width: 1039px)").matches) return;
       if (
         target?.closest(
           "input, textarea, select, button, a, [contenteditable='true']",
@@ -618,17 +702,14 @@ export function PathloomEditor() {
 
       const interactionId = entityId("interaction");
       const outcomeId = entityId("outcome");
-      const selectedState = sourceNode.states.find(
-        (state) => state.id === previewStateIds[sourceNode.id],
-      );
       const interaction: Interaction = {
         id: interactionId,
-        name: "New interaction",
-        kind: "async",
+        name: "New action",
+        kind: "navigation",
         trigger: "click",
         sourceNodeId: sourceNode.id,
-        sourceStateId:
-          selectedState?.id ?? resolveInitialStateId(sourceNode) ?? null,
+        sourceStateId: null,
+        position: freeScreenPosition(nodesRef.current, { x: sourceNode.position.x + 330, y: sourceNode.position.y + 70 }),
         outcomes: [
           {
             id: outcomeId,
@@ -640,14 +721,14 @@ export function PathloomEditor() {
       };
       const committed = commitProject(
         { ...current, interactions: [...current.interactions, interaction] },
-        "Interaction added — define its outcomes",
+        "Action added — name it and choose where each outcome goes",
       );
       if (committed) {
         setSelectedId(interactionNodeId(interactionId));
         setCoverageOpen(false);
       }
     },
-    [commitProject, previewStateIds, requireDesignMode, selectedId, showToast],
+    [commitProject, requireDesignMode, selectedId, showToast],
   );
 
   const addOutcome = useCallback(
@@ -678,7 +759,7 @@ export function PathloomEditor() {
               : interaction,
           ),
         },
-        "Outcome added — choose its kind and target",
+        "Outcome added — name it and choose a destination",
       );
       return outcomeId;
     },
@@ -728,7 +809,15 @@ export function PathloomEditor() {
           ...current,
           interactions: current.interactions.map((interaction) =>
             interaction.id === interactionId
-              ? { ...interaction, ...patch }
+              ? {
+                  ...interaction,
+                  ...patch,
+                  incomingRoute:
+                    patch.sourceNodeId !== undefined &&
+                    patch.sourceNodeId !== interaction.sourceNodeId
+                      ? undefined
+                      : interaction.incomingRoute,
+                }
               : interaction,
           ),
         },
@@ -754,7 +843,17 @@ export function PathloomEditor() {
               ? {
                   ...interaction,
                   outcomes: interaction.outcomes.map((outcome) =>
-                    outcome.id === outcomeId ? { ...outcome, ...patch } : outcome,
+                    outcome.id === outcomeId
+                      ? {
+                          ...outcome,
+                          ...patch,
+                          route:
+                            patch.target !== undefined &&
+                            patch.target?.nodeId !== outcome.target?.nodeId
+                              ? undefined
+                              : outcome.route,
+                        }
+                      : outcome,
                   ),
                 }
               : interaction,
@@ -765,6 +864,31 @@ export function PathloomEditor() {
     },
     [commitProject, requireDesignMode],
   );
+
+  const deleteState = useCallback((nodeId: string, stateId: string) => {
+    if (!requireDesignMode()) return;
+    const current = projectRef.current;
+    const next = removeUnusedState(current, nodeId, stateId);
+    if (next === current) {
+      showToast("Keep at least one state. Change the flow’s default start state or reconnect any actions and outcomes that use this state before deleting.");
+      return;
+    }
+    commitProject(next, "Unused state removed");
+    setPreviewStateIds((ids) => {
+      if (ids[nodeId] !== stateId) return ids;
+      const nextIds = { ...ids };
+      delete nextIds[nodeId];
+      return nextIds;
+    });
+  }, [commitProject, requireDesignMode, showToast]);
+
+  const deleteOutcome = useCallback((interactionId: string, outcomeId: string) => {
+    const current = projectRef.current;
+    commitProject({ ...current, interactions: current.interactions.map((action) => action.id === interactionId ? {
+      ...action, outcomes: action.outcomes.filter((outcome) => outcome.id !== outcomeId),
+    } : action) }, "Outcome removed — Undo to restore it");
+    if (selectedEdgeId === `edge:${outcomeId}`) setSelectedEdgeId(null);
+  }, [commitProject, selectedEdgeId]);
 
   const focusIssue = useCallback(
     (issue: AnalysisIssue) => {
@@ -814,10 +938,7 @@ export function PathloomEditor() {
         );
         const endingNode: FlowNode = {
           id: endingNodeId,
-          name:
-            outcome.kind === "offline"
-              ? "Offline checkout"
-              : `${titleCase(outcome.name)} ending`,
+          name: `${titleCase(outcome.name)} ending`,
           kind: "terminal",
           description: `A generated intentional ending for the ${outcome.name} outcome.`,
           position: {
@@ -848,6 +969,7 @@ export function PathloomEditor() {
                             nodeId: endingNodeId,
                             stateId: endingStateId,
                           },
+                          route: undefined,
                         }
                       : itemOutcome,
                   ),
@@ -1167,17 +1289,14 @@ export function PathloomEditor() {
         showToast("Intentional endings cannot start new interactions");
         return;
       }
-      const sourceState = sourceNode.states.find(
-        (state) => state.id === previewStateIds[sourceNode.id],
-      );
       const interaction: Interaction = {
         id: entityId("interaction"),
         name: "Continue",
         kind: "navigation",
         trigger: "click",
         sourceNodeId: connection.source,
-        sourceStateId:
-          sourceState?.id ?? resolveInitialStateId(sourceNode) ?? null,
+        sourceStateId: null,
+        position: freeScreenPosition(nodesRef.current, { x: sourceNode.position.x + 330, y: sourceNode.position.y + 70 }),
         outcomes: [
           {
             id: entityId("outcome"),
@@ -1213,6 +1332,7 @@ export function PathloomEditor() {
     const next = initialSimulation(projectRef.current);
     modeRef.current = "simulate";
     setMode("simulate");
+    setSelectedEdgeId(null);
     setCoverageOpen(false);
     setSimulation(next);
     setSimulationPast([]);
@@ -1222,22 +1342,23 @@ export function PathloomEditor() {
       (node) => node.id === projectRef.current.entryNodeId,
     );
     setSelectedId(entryExists ? projectRef.current.entryNodeId : null);
-    if (entryExists) {
-      flowRef.current?.fitView({
-        nodes: [{ id: projectRef.current.entryNodeId }],
-        duration: 400,
-        padding: 0.65,
-        maxZoom: 1.05,
-      });
-    }
   }, [syncPreviewToCursor]);
 
   const stopSimulation = useCallback(() => {
     modeRef.current = "design";
     setMode("design");
+    setSelectedEdgeId(null);
     setSimulationPast([]);
+    if (simulation.cursor.type === "blocked" && simulation.cursor.outcomeId) {
+      const outcomeId = simulation.cursor.outcomeId;
+      const owner = projectRef.current.interactions.find((action) => action.outcomes.some((outcome) => outcome.id === outcomeId));
+      if (owner) {
+        setSelectedId(interactionNodeId(owner.id));
+        setFocusedOutcomeId(outcomeId);
+      }
+    }
     showToast("Simulation ended — the document was not changed");
-  }, [showToast]);
+  }, [showToast, simulation.cursor]);
 
   const chooseInteraction = useCallback(
     (interactionId: string) => {
@@ -1268,6 +1389,7 @@ export function PathloomEditor() {
           ...current.traversedEdgeIds,
           `edge:into:${interactionId}`,
         ],
+        visitedNodeIds: [...current.visitedNodeIds, interactionNodeId(interactionId)],
       }));
       const actionId = interactionNodeId(interactionId);
       if (nodesRef.current.some((node) => node.id === actionId)) {
@@ -1391,14 +1513,6 @@ export function PathloomEditor() {
         visitedNodeIds: [...current.visitedNodeIds, destination.id],
       }));
       setSelectedId(destination.id);
-      window.setTimeout(() => {
-        flowRef.current?.fitView({
-          nodes: [{ id: destination.id }],
-          duration: 420,
-          padding: 0.7,
-          maxZoom: 1.05,
-        });
-      }, 0);
     },
     [simulation, syncPreviewToCursor],
   );
@@ -1409,28 +1523,8 @@ export function PathloomEditor() {
     setSimulation(previous);
     setSimulationPast((items) => items.slice(0, -1));
     syncPreviewToCursor(previous.cursor);
-    let focusId = previous.cursor.nodeId;
-    if (previous.cursor.type === "interaction") {
-      focusId = interactionNodeId(previous.cursor.id);
-    } else if (
-      previous.cursor.type === "blocked" &&
-      previous.cursor.reason === "unresolved" &&
-      previous.cursor.outcomeId
-    ) {
-      focusId = unresolvedNodeId(previous.cursor.outcomeId);
-    }
+    const focusId = simulationFocusId(previous.cursor);
     setSelectedId(focusId);
-    const visibleFocusId = nodesRef.current.some((node) => node.id === focusId)
-      ? focusId
-      : previous.cursor.nodeId;
-    window.setTimeout(() => {
-      flowRef.current?.fitView({
-        nodes: [{ id: visibleFocusId }],
-        duration: 360,
-        padding: 0.7,
-        maxZoom: 1.05,
-      });
-    }, 0);
   }, [simulationPast, syncPreviewToCursor]);
 
   const previewState = useMemo<UIState | null>(() => {
@@ -1447,14 +1541,10 @@ export function PathloomEditor() {
   }, [previewStateIds, project.nodes, selectedId]);
 
   const displayNodes = useMemo<Node[]>(() => {
-    const interactionId =
-      simulation.cursor.type === "interaction"
-        ? interactionNodeId(simulation.cursor.id)
-        : null;
-    const activeId =
-      interactionId && nodes.some((node) => node.id === interactionId)
-        ? interactionId
-        : simulation.cursor.nodeId;
+    const focusId = simulationFocusId(simulation.cursor);
+    const activeId = nodes.some((node) => node.id === focusId)
+      ? focusId
+      : simulation.cursor.nodeId;
     const visited = new Set(simulation.visitedNodeIds);
 
     return nodes.map((node) => {
@@ -1470,6 +1560,7 @@ export function PathloomEditor() {
             data.variant as Parameters<typeof variantForState>[1],
           );
           data.stateLabel = state.name;
+          data.description = state.description ?? projectNode?.description;
         }
       }
       if (mode === "simulate") {
@@ -1479,15 +1570,27 @@ export function PathloomEditor() {
         data.active = false;
         data.dimmed = false;
       }
-      return { ...node, data, selected: node.id === selectedId };
+      return {
+        ...node,
+        data,
+        selected: node.id === (mode === "simulate" ? activeId : selectedId),
+      };
     });
   }, [mode, nodes, previewStateIds, project.nodes, selectedId, simulation]);
 
-  const displayEdges = useMemo(() => {
-    const edges = buildEditorEdges(project);
+  const displayEdges = useMemo<PathloomEdge[]>(() => {
+    const edges = buildEditorEdges(project).map((edge): PathloomEdge => ({
+      ...edge,
+      selected: mode === "design" && edge.id === selectedEdgeId,
+      data: {
+        ...edge.data,
+        editable: mode === "design",
+        onRouteCommit: commitEdgeRoute,
+      },
+    }));
     if (mode !== "simulate") return edges;
     const traversed = new Set(simulation.traversedEdgeIds);
-    return edges.map((edge) => {
+    return edges.map((edge): PathloomEdge => {
       const active = traversed.has(edge.id);
       return {
         ...edge,
@@ -1504,7 +1607,7 @@ export function PathloomEditor() {
         },
       };
     });
-  }, [mode, project, simulation.traversedEdgeIds]);
+  }, [commitEdgeRoute, mode, project, selectedEdgeId, simulation.traversedEdgeIds]);
 
   const handleNodeDragStart = useCallback(() => {
     if (modeRef.current !== "design") return;
@@ -1546,9 +1649,13 @@ export function PathloomEditor() {
       );
       pushPast(before);
       const nextProject = applyNodePositions(projectRef.current, currentNodes);
-      nodesRef.current = currentNodes;
+      const refreshedNodes = preserveNodePositions(
+        buildEditorNodes(nextProject, analyzeProject(nextProject)),
+        currentNodes,
+      );
+      nodesRef.current = refreshedNodes;
       projectRef.current = nextProject;
-      setNodes(currentNodes);
+      setNodes(refreshedNodes);
       setProject(nextProject);
       setSaveStatus("saving");
     },
@@ -1557,41 +1664,54 @@ export function PathloomEditor() {
 
   const handleNodesChange = useCallback<OnNodesChange<Node>>(
     (changes) => {
-      onNodesChange(changes);
+      // React Flow still needs measurements while previewing, but selection
+      // and movement belong to the editor; the simulation owns its cursor.
+      onNodesChange(modeRef.current === "design"
+        ? changes
+        : changes.filter((change) => change.type === "dimensions"));
+      if (modeRef.current !== "design") return;
       const selectedChange = [...changes]
         .reverse()
         .find((change) => change.type === "select" && change.selected);
       if (selectedChange?.type === "select") {
         setSelectedId(selectedChange.id);
+        setSelectedEdgeId(null);
+        return;
+      }
+      // The inspector owns selection. React Flow can emit a delayed deselection
+      // while newly created nodes are measured; that must not close the editor.
+      // Intentional deselection is handled by onPaneClick instead.
+    },
+    [onNodesChange],
+  );
+
+  const handleEdgesChange = useCallback<OnEdgesChange<PathloomEdge>>(
+    (changes) => {
+      if (modeRef.current !== "design") return;
+      const selectedChange = [...changes]
+        .reverse()
+        .find((change) => change.type === "select" && change.selected);
+      if (selectedChange?.type === "select") {
+        selectEdge(selectedChange.id);
         return;
       }
       if (
-        selectedId &&
+        selectedEdgeId &&
         changes.some(
           (change) =>
             change.type === "select" &&
-            change.id === selectedId &&
+            change.id === selectedEdgeId &&
             !change.selected,
         )
       ) {
-        setSelectedId(null);
+        setSelectedEdgeId(null);
       }
     },
-    [onNodesChange, selectedId],
+    [selectEdge, selectedEdgeId],
   );
 
   return (
-    <main className={styles.shell}>
-      <section className={styles.viewportGuard} role="status">
-        <span className={styles.viewportGuardIcon}>
-          <Monitor aria-hidden="true" size={24} />
-        </span>
-        <h1>Pathloom needs a wider canvas</h1>
-        <p>
-          Open this editor in a desktop window at least 1040 pixels wide. Your
-          local flow stays saved while you resize.
-        </p>
-      </section>
+    <main className={`${styles.shell} ${mode === "simulate" ? styles.previewShell : ""}`}>
       <Topbar
         canRedo={mode === "design" && future.length > 0}
         canUndo={mode === "design" && past.length > 0}
@@ -1617,14 +1737,15 @@ export function PathloomEditor() {
         saveStatus={saveStatus}
       />
 
-      <LeftSidebar
+      {mode === "design" && <LeftSidebar
         analysis={analysis}
         onAddInteraction={() => addInteraction()}
         onAddScreen={() => addScreen()}
+        onLoadExample={loadExample}
         onSelect={selectAndCenter}
         project={project}
         selectedId={selectedId}
-      />
+      />}
 
       <section
         aria-label="Flow canvas"
@@ -1635,7 +1756,7 @@ export function PathloomEditor() {
         >
           {coverageOpen ? (
             <>
-              <Scan aria-hidden="true" size={11} /> Coverage overlay
+              <Scan aria-hidden="true" size={11} /> Check flow
             </>
           ) : mode === "simulate" ? (
             <>
@@ -1643,64 +1764,19 @@ export function PathloomEditor() {
             </>
           ) : (
             <>
-              <GitBranch aria-hidden="true" size={11} /> State graph
+              <GitBranch aria-hidden="true" size={11} /> Your flow
             </>
           )}
         </div>
 
-        {mode === "design" && (
-          <div aria-label="Canvas tools" className={styles.canvasToolbar} role="toolbar">
-          <span
-            className={`${styles.toolButton} ${styles.toolActive}`}
-            title="Selection is active"
-          >
-            <MousePointer2 aria-hidden="true" size={14} />
-          </span>
-          <span aria-hidden="true" className={styles.toolbarDivider} />
-          <button
-            aria-label="Add screen"
-            className={styles.toolButton}
-            onClick={() => addScreen()}
-            title="Add screen (N)"
-            type="button"
-          >
-            <Monitor aria-hidden="true" size={14} />
-          </button>
-          <button
-            aria-label="Add branch"
-            className={styles.toolButton}
-            onClick={() => addInteraction()}
-            title="Add branch"
-            type="button"
-          >
-            <GitBranch aria-hidden="true" size={14} />
-          </button>
-          <button
-            aria-label="Add text"
-            className={styles.toolButton}
-            disabled
-            title="Freeform text is planned after the MVP"
-            type="button"
-          >
-            <Type aria-hidden="true" size={14} />
-          </button>
-          <button
-            aria-label="Add shape"
-            className={styles.toolButton}
-            disabled
-            title="Freeform shapes are planned after the MVP"
-            type="button"
-          >
-            <Square aria-hidden="true" size={14} />
-          </button>
-          </div>
-        )}
-
+        <div className={styles.graphSurface}>
         <ReactFlow
           colorMode="light"
           deleteKeyCode={null}
           edges={displayEdges}
+          edgeTypes={pathloomEdgeTypes}
           elementsSelectable={mode === "design"}
+          edgesFocusable={mode === "design"}
           fitView
           fitViewOptions={{
             padding: 0.08,
@@ -1714,31 +1790,28 @@ export function PathloomEditor() {
           nodes={displayNodes}
           nodesConnectable={mode === "design"}
           nodesDraggable={mode === "design"}
+          nodesFocusable={mode === "design"}
           onConnect={connectNodes}
           onEdgeClick={(_event, edge) => {
-            const interactionId = edge.data?.interactionId;
-            if (typeof interactionId === "string") {
-              setSelectedId(interactionNodeId(interactionId));
-              setFocusedOutcomeId(
-                typeof edge.data?.outcomeId === "string"
-                  ? edge.data.outcomeId
-                  : null,
-              );
-              setCoverageOpen(false);
-            }
+            if (mode === "design") selectEdge(edge.id);
           }}
+          onEdgesChange={handleEdgesChange}
           onInit={(instance) => {
             flowRef.current = instance;
           }}
           onNodeClick={(_event, node) => {
-            setSelectedId(node.id);
-            setFocusedOutcomeId(null);
+            if (mode !== "design") return;
+            setSelectedEdgeId(null);
+            const unresolvedAction = project.interactions.find((action) => action.outcomes.some((outcome) => unresolvedNodeId(outcome.id) === node.id));
+            setSelectedId(unresolvedAction ? interactionNodeId(unresolvedAction.id) : node.id);
+            setFocusedOutcomeId(unresolvedAction?.outcomes.find((outcome) => unresolvedNodeId(outcome.id) === node.id)?.id ?? null);
             setCoverageOpen(false);
           }}
           onNodeDragStart={handleNodeDragStart}
           onNodeDragStop={handleNodeDragStop}
           onNodesChange={handleNodesChange}
           onPaneClick={(event) => {
+            if (mode !== "design") return;
             if (event.detail === 2 && mode === "design") {
               const position = flowRef.current?.screenToFlowPosition({
                 x: event.clientX,
@@ -1748,13 +1821,15 @@ export function PathloomEditor() {
               return;
             }
             setSelectedId(null);
+            setSelectedEdgeId(null);
           }}
           panOnDrag={[0, 1]}
-          selectionOnDrag
+          selectionOnDrag={mode === "design"}
           snapGrid={[10, 10]}
           snapToGrid
           zoomOnDoubleClick={false}
         >
+          <SimulationViewport cursor={mode === "simulate" ? simulation.cursor : null} />
           <Background
             color={coverageOpen ? "#d9b267" : "#b8c1ba"}
             gap={20}
@@ -1763,6 +1838,7 @@ export function PathloomEditor() {
           />
           <Controls position="bottom-left" showInteractive={false} />
         </ReactFlow>
+        </div>
 
         {mode === "simulate" && (
           <SimulationTray
@@ -1779,7 +1855,11 @@ export function PathloomEditor() {
         )}
 
         {mode === "design" && (
-          <div className={styles.canvasHint}>Double-click to add a screen · Drag handles to connect</div>
+          <div className={styles.canvasHint}>
+            {selectedEdgeId
+              ? "Drag the purple dot to reroute · Double-click it to reset"
+              : "Select a screen to edit it · Drag the canvas to pan"}
+          </div>
         )}
         {toast && (
           <div aria-live="polite" className={styles.toast} role="status">
@@ -1789,7 +1869,7 @@ export function PathloomEditor() {
         )}
       </section>
 
-      <Inspector
+      {mode === "design" && <Inspector
         analysis={analysis}
         coverageOpen={coverageOpen}
         initialOutcomeId={focusedOutcomeId}
@@ -1798,10 +1878,14 @@ export function PathloomEditor() {
         onAddOutcome={addOutcome}
         onCloseCoverage={() => setCoverageOpen(false)}
         onCreateState={createState}
+        onSelect={selectAndCenter}
+        onDeleteSelection={deleteSelection}
+        onDeleteState={deleteState}
+        onDeleteOutcome={deleteOutcome}
         onFixIssue={fixIssue}
         onFocusIssue={focusIssue}
         onPreviewState={(stateId) => {
-          if (!selectedId || mode === "simulate") return;
+          if (!selectedId) return;
           setPreviewStateIds((current) => ({
             ...current,
             [selectedId]: stateId,
@@ -1815,9 +1899,9 @@ export function PathloomEditor() {
         onUpdateOutcome={updateOutcome}
         previewStateId={previewState?.id ?? null}
         project={project}
-        readOnly={mode === "simulate"}
+        readOnly={false}
         selectedId={selectedId}
-      />
+      />}
     </main>
   );
 }

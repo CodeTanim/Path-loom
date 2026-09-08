@@ -1,8 +1,7 @@
 import {
   AlertTriangle,
+  ArrowLeft,
   Check,
-  ChevronRight,
-  CircleStop,
   Play,
   Redo2,
   Undo2,
@@ -10,6 +9,7 @@ import {
 
 import { BrandMark } from "./components/BrandMark";
 import styles from "./editor.module.css";
+import shellStyles from "./shell-controls.module.css";
 
 export type EditorMode = "design" | "simulate";
 export type SaveStatus = "saving" | "saved" | "failed";
@@ -32,15 +32,14 @@ interface TopbarProps {
 }
 
 export function Topbar({
-  projectLabel = "Acme Shop",
-  flowLabel = "Checkout recovery",
+  projectLabel = "Pathloom",
+  flowLabel = "Your flow",
   saveStatus = "saved",
   mode,
   issueCount,
   coverageOpen,
   canUndo,
   canRedo,
-  onModeChange,
   onToggleCoverage,
   onUndo,
   onRedo,
@@ -51,20 +50,24 @@ export function Topbar({
     saveStatus === "failed"
       ? "Local save failed"
       : saveStatus === "saving"
-        ? "Saving locally"
-        : "Saved locally";
+        ? "Saving in this browser"
+        : "Saved in this browser";
 
   return (
-    <header className={styles.topbar}>
+    <header className={`${styles.topbar} ${shellStyles.topbar}`}>
       <div className={styles.brandGroup}>
         <BrandMark />
         <span aria-hidden="true" className={styles.brandDivider} />
-        <nav aria-label="Project breadcrumb" className={styles.breadcrumbs}>
-          <span className={styles.breadcrumbProject}>{projectLabel}</span>
-          <ChevronRight aria-hidden="true" size={11} />
-          <span className={styles.breadcrumbFlow}>{flowLabel}</span>
-        </nav>
-        <span aria-live="polite" className={styles.saveState}>
+        <span
+          className={shellStyles.flowName}
+          title={`${projectLabel} / ${flowLabel}`}
+        >
+          {flowLabel}
+        </span>
+        <span
+          aria-live="polite"
+          className={`${styles.saveState} ${shellStyles.saveState}`}
+        >
           <span
             aria-hidden="true"
             className={`${styles.saveDot} ${
@@ -79,76 +82,57 @@ export function Topbar({
         </span>
       </div>
 
-      <div className={styles.topbarCenter}>
-        <div aria-label="Editor mode" className={styles.modeSwitch} role="group">
-          <button
-            aria-pressed={mode === "design"}
-            className={`${styles.segmentButton} ${mode === "design" ? styles.segmentActive : ""}`}
-            onClick={() => onModeChange("design")}
-            type="button"
-          >
-            Design
-          </button>
-          <button
-            aria-pressed={mode === "simulate"}
-            className={`${styles.segmentButton} ${mode === "simulate" ? styles.segmentActive : ""}`}
-            onClick={() => onModeChange("simulate")}
-            type="button"
-          >
-            <Play aria-hidden="true" size={10} />
-            Simulate
-          </button>
-        </div>
-      </div>
-
       <div className={styles.topbarActions}>
-        <button
-          aria-label="Undo"
-          className={styles.iconButton}
-          disabled={!canUndo}
-          onClick={onUndo}
-          title="Undo (⌘Z)"
-          type="button"
-        >
-          <Undo2 aria-hidden="true" size={15} />
-        </button>
-        <button
-          aria-label="Redo"
-          className={styles.iconButton}
-          disabled={!canRedo}
-          onClick={onRedo}
-          title="Redo (⇧⌘Z)"
-          type="button"
-        >
-          <Redo2 aria-hidden="true" size={15} />
-        </button>
+        {mode === "design" && (
+          <>
+            <button
+              aria-label="Undo"
+              className={styles.iconButton}
+              disabled={!canUndo}
+              onClick={onUndo}
+              title="Undo (⌘Z)"
+              type="button"
+            >
+              <Undo2 aria-hidden="true" size={15} />
+            </button>
+            <button
+              aria-label="Redo"
+              className={styles.iconButton}
+              disabled={!canRedo}
+              onClick={onRedo}
+              title="Redo (⇧⌘Z)"
+              type="button"
+            >
+              <Redo2 aria-hidden="true" size={15} />
+            </button>
 
-        <button
-          aria-pressed={coverageOpen}
-          className={`${styles.coverageButton} ${coverageOpen ? styles.coverageActive : ""}`}
-          disabled={mode === "simulate"}
-          onClick={onToggleCoverage}
-          title={mode === "simulate" ? "Exit simulation to edit coverage" : undefined}
-          type="button"
-        >
-          {issueCount > 0 ? (
-            <AlertTriangle aria-hidden="true" size={13} />
-          ) : (
-            <Check aria-hidden="true" size={13} />
-          )}
-          <span>Coverage</span>
-          <span className={styles.issueCount}>{issueCount}</span>
-        </button>
+            <button
+              aria-pressed={coverageOpen}
+              className={`${shellStyles.checkButton} ${coverageOpen ? shellStyles.checkActive : ""}`}
+              onClick={onToggleCoverage}
+              title="Find unfinished paths and unreachable screens"
+              type="button"
+            >
+              {issueCount > 0 ? (
+                <AlertTriangle aria-hidden="true" size={13} />
+              ) : (
+                <Check aria-hidden="true" size={13} />
+              )}
+              <span>Check flow</span>
+              <span className={shellStyles.issueCount}>{issueCount}</span>
+            </button>
+          </>
+        )}
 
         {mode === "simulate" ? (
-          <button className={styles.secondaryButton} onClick={onStop} type="button">
-            <CircleStop aria-hidden="true" size={13} />
-            Stop run
+          <button className={styles.primaryButton} onClick={onStop} type="button">
+            <ArrowLeft aria-hidden="true" size={13} />
+            Back to editor
           </button>
         ) : (
           <button className={styles.primaryButton} onClick={onRun} type="button">
             <Play aria-hidden="true" fill="currentColor" size={12} />
-            Run flow
+            Preview
           </button>
         )}
       </div>

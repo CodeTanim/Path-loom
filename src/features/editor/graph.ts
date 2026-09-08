@@ -1,6 +1,6 @@
 import {
   MarkerType,
-  type Edge,
+  Position,
   type Node,
 } from "@xyflow/react";
 
@@ -14,9 +14,11 @@ import type {
   UIStateKind,
 } from "@/domain";
 import type {
+  ConnectorSide,
   InteractionNodeData,
   ScreenNodeData,
 } from "./components/FlowNodes";
+import type { PathloomEdge } from "./components/EditableEdge";
 import type { ScreenPreviewVariant } from "./components/ScreenPreview";
 
 export const interactionNodeId = (interactionId: string) =>
@@ -24,26 +26,6 @@ export const interactionNodeId = (interactionId: string) =>
 
 export const unresolvedNodeId = (outcomeId: string) =>
   `unresolved:${outcomeId}`;
-
-const ROUTES: Record<string, string> = {
-  checkout: "/checkout",
-  confirmation: "/order/confirmed",
-  declined: "/checkout/payment",
-  retry: "/checkout/retry",
-  "sign-in": "/login?return=checkout",
-  "legacy-receipt": "/orders/:id/receipt",
-  offline: "/checkout/offline",
-};
-
-const NODE_VARIANTS: Record<string, ScreenPreviewVariant> = {
-  checkout: "checkout",
-  confirmation: "success",
-  declined: "error",
-  retry: "retry",
-  "sign-in": "login",
-  "legacy-receipt": "orders",
-  offline: "retry",
-};
 
 export const STATE_VARIANTS: Record<
   CoreUIStateKind,
@@ -124,25 +106,124 @@ function unresolvedPosition(
   };
 }
 
+const SCREEN_NODE_WIDTH = 246;
+const INTERACTION_NODE_WIDTH = 202;
+const UNRESOLVED_NODE_WIDTH = 188;
+
+interface ProjectedGeometry {
+  position: CanvasPosition;
+  width: number;
+}
+
+interface PortUsage {
+  inputs: Set<ConnectorSide>;
+  outputs: Set<ConnectorSide>;
+}
+
+function projectedGeometries(project: ProjectDocument) {
+  const geometries = new Map<string, ProjectedGeometry>();
+  project.nodes.forEach((node) => {
+    geometries.set(node.id, {
+      position: node.position,
+      width: SCREEN_NODE_WIDTH,
+    });
+  });
+  project.interactions.forEach((interaction) => {
+    geometries.set(interactionNodeId(interaction.id), {
+      position: interactionPosition(project, interaction),
+      width: INTERACTION_NODE_WIDTH,
+    });
+    interaction.outcomes.forEach((outcome, outcomeIndex) => {
+      if (outcome.target !== null) return;
+      geometries.set(unresolvedNodeId(outcome.id), {
+        position: unresolvedPosition(project, interaction, outcomeIndex),
+        width: UNRESOLVED_NODE_WIDTH,
+      });
+    });
+  });
+  return geometries;
+}
+
+/** Chooses the two facing horizontal ports for a projected connection. */
+export function connectorSidesFor(
+  geometries: Map<string, ProjectedGeometry>,
+  sourceId: string,
+  targetId: string,
+): { source: ConnectorSide; target: ConnectorSide } {
+  const source = geometries.get(sourceId);
+  const target = geometries.get(targetId);
+  if (!source || !target) return { source: "right", target: "left" };
+  const sourceCenterX = source.position.x + source.width / 2;
+  const targetCenterX = target.position.x + target.width / 2;
+  return targetCenterX >= sourceCenterX
+    ? { source: "right", target: "left" }
+    : { source: "left", target: "right" };
+}
+
+function portUsageFor(project: ProjectDocument) {
+  const geometries = projectedGeometries(project);
+  const usage = new Map<string, PortUsage>();
+  const portsFor = (id: string) => {
+    const current = usage.get(id);
+    if (current) return current;
+    const created = {
+      inputs: new Set<ConnectorSide>(),
+      outputs: new Set<ConnectorSide>(),
+    };
+    usage.set(id, created);
+    return created;
+  };
+  const includeConnection = (sourceId: string, targetId: string) => {
+    const sides = connectorSidesFor(geometries, sourceId, targetId);
+    portsFor(sourceId).outputs.add(sides.source);
+    portsFor(targetId).inputs.add(sides.target);
+  };
+
+  project.interactions.forEach((interaction) => {
+    const actionId = interactionNodeId(interaction.id);
+    includeConnection(interaction.sourceNodeId, actionId);
+    interaction.outcomes.forEach((outcome) => {
+      includeConnection(
+        actionId,
+        outcome.target?.nodeId ?? unresolvedNodeId(outcome.id),
+      );
+    });
+  });
+
+  return { geometries, usage };
+}
+
+function sidesOrDefault(
+  sides: Set<ConnectorSide> | undefined,
+  fallback: ConnectorSide,
+) {
+  return sides && sides.size > 0 ? [...sides].sort() : [fallback];
+}
+
 export function buildEditorNodes(
   project: ProjectDocument,
   analysis: ProjectAnalysis,
 ): Node[] {
+  const { usage } = portUsageFor(project);
   const nodes: Node[] = project.nodes.map((node) => {
     const initialState = node.states.find(
       (state) => state.id === node.initialStateId,
     );
     const data: ScreenNodeData = {
       label: node.name,
-      route: ROUTES[node.id] ?? `/${node.id}`,
-      variant:
-        NODE_VARIANTS[node.id] ??
-        variantForState(initialState?.kind, "checkout"),
+      description: initialState?.description ?? node.description,
+      route: node.id,
+      variant: variantForState(initialState?.kind, "checkout"),
       stateLabel: initialState?.name ?? "Invalid initial state",
       stateCount: node.states.length,
       isStart: project.entryNodeId === node.id,
       canStartInteractions: node.kind !== "terminal",
       warning: warningForNode(node.id, analysis),
+      inputSides: sidesOrDefault(usage.get(node.id)?.inputs, "left"),
+      outputSides:
+        node.kind === "terminal"
+          ? []
+          : sidesOrDefault(usage.get(node.id)?.outputs, "right"),
     };
     return {
       id: node.id,
@@ -167,6 +248,14 @@ export function buildEditorNodes(
           ? "All states"
           : sourceState?.name ?? "Missing state",
       outcomeCount: interaction.outcomes.length,
+      inputSides: sidesOrDefault(
+        usage.get(interactionNodeId(interaction.id))?.inputs,
+        "left",
+      ),
+      outputSides: sidesOrDefault(
+        usage.get(interactionNodeId(interaction.id))?.outputs,
+        "right",
+      ),
     };
     nodes.push({
       id: interactionNodeId(interaction.id),
@@ -177,10 +266,17 @@ export function buildEditorNodes(
 
     interaction.outcomes.forEach((outcome, outcomeIndex) => {
       if (outcome.target !== null) return;
+      const placeholderId = unresolvedNodeId(outcome.id);
+      const targetSide = sidesOrDefault(
+        usage.get(placeholderId)?.inputs,
+        "left",
+      )[0];
       nodes.push({
-        id: unresolvedNodeId(outcome.id),
+        id: placeholderId,
         type: "output",
         position: unresolvedPosition(project, interaction, outcomeIndex),
+        targetPosition:
+          targetSide === "left" ? Position.Left : Position.Right,
         data: { label: `Choose target · ${outcome.name}` },
         selectable: true,
         draggable: false,
@@ -207,10 +303,11 @@ export function buildEditorNodes(
 
 function edgeForOutcome(
   project: ProjectDocument,
+  geometries: Map<string, ProjectedGeometry>,
   source: string,
   interaction: Interaction,
   outcomeIndex: number,
-): Edge {
+): PathloomEdge {
   const outcome = interaction.outcomes[outcomeIndex];
   const color = OUTCOME_COLORS[outcome.kind];
   const targetNode = project.nodes.find(
@@ -223,14 +320,15 @@ function edgeForOutcome(
   const targetStateLabel = outcome.target
     ? targetState?.name ?? "Invalid state"
     : "Unresolved";
+  const target = outcome.target?.nodeId ?? unresolvedNodeId(outcome.id);
+  const sides = connectorSidesFor(geometries, source, target);
   return {
     id: `edge:${outcome.id}`,
     source,
-    sourceHandle: "out",
-    target:
-      outcome.target?.nodeId ?? unresolvedNodeId(outcome.id),
-    targetHandle: outcome.target ? "in" : undefined,
-    type: "smoothstep",
+    sourceHandle: `out-${sides.source}`,
+    target,
+    targetHandle: outcome.target ? `in-${sides.target}` : undefined,
+    type: "pathloom",
     label: `${humanize(outcome.name)} → ${targetStateLabel}`,
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 },
     style: { stroke: color, strokeWidth: 1.7 },
@@ -247,12 +345,14 @@ function edgeForOutcome(
       interactionId: interaction.id,
       outcomeId: outcome.id,
       kind: outcome.kind,
+      route: outcome.route,
     },
   };
 }
 
-export function buildEditorEdges(project: ProjectDocument): Edge[] {
-  const edges: Edge[] = [];
+export function buildEditorEdges(project: ProjectDocument): PathloomEdge[] {
+  const geometries = projectedGeometries(project);
+  const edges: PathloomEdge[] = [];
 
   for (const interaction of project.interactions) {
     const sourceNode = project.nodes.find(
@@ -265,13 +365,19 @@ export function buildEditorEdges(project: ProjectDocument): Edge[] {
       interaction.sourceStateId === null
         ? "all states"
         : sourceState?.name ?? "missing state";
+    const actionId = interactionNodeId(interaction.id);
+    const sides = connectorSidesFor(
+      geometries,
+      interaction.sourceNodeId,
+      actionId,
+    );
     edges.push({
       id: `edge:into:${interaction.id}`,
       source: interaction.sourceNodeId,
-      sourceHandle: "out",
-      target: interactionNodeId(interaction.id),
-      targetHandle: "in",
-      type: "smoothstep",
+      sourceHandle: `out-${sides.source}`,
+      target: actionId,
+      targetHandle: `in-${sides.target}`,
+      type: "pathloom",
       label: `${interaction.name} · ${sourceScope}`,
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -288,13 +394,17 @@ export function buildEditorEdges(project: ProjectDocument): Edge[] {
         strokeWidth: 1,
       },
       labelStyle: { fill: "#137b68", fontSize: 9, fontWeight: 650 },
-      data: { interactionId: interaction.id },
+      data: {
+        interactionId: interaction.id,
+        route: interaction.incomingRoute,
+      },
     });
 
     interaction.outcomes.forEach((_, outcomeIndex) => {
       edges.push(
         edgeForOutcome(
           project,
+          geometries,
           interactionNodeId(interaction.id),
           interaction,
           outcomeIndex,

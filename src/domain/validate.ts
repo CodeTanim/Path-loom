@@ -145,6 +145,13 @@ function isPosition(value: unknown) {
   );
 }
 
+function isOptionalEdgeRoute(value: unknown) {
+  return (
+    value === undefined ||
+    (isRecord(value) && isPosition(value.bendOffset))
+  );
+}
+
 function isSize(value: unknown) {
   return (
     value === undefined ||
@@ -211,7 +218,8 @@ function isOutcome(value: unknown) {
     OUTCOME_KINDS.has(value.kind as OutcomeKind) &&
     hasOptionalString(value, "description") &&
     hasOptionalString(value, "condition") &&
-    isTarget(value.target)
+    isTarget(value.target) &&
+    isOptionalEdgeRoute(value.route)
   );
 }
 
@@ -228,7 +236,8 @@ function isInteraction(value: unknown) {
     isNonEmptyString(value.sourceNodeId) &&
     isNullableReference(value.sourceStateId) &&
     Array.isArray(value.outcomes) &&
-    value.outcomes.every(isOutcome)
+    value.outcomes.every(isOutcome) &&
+    isOptionalEdgeRoute(value.incomingRoute)
   );
 }
 

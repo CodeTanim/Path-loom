@@ -29,6 +29,12 @@ export interface CanvasSize {
   height: number;
 }
 
+/** A renderer-independent hint for manually routing one graph connection. */
+export interface EdgeRoute {
+  /** Offset from the connection's automatically calculated center point. */
+  bendOffset: CanvasPosition;
+}
+
 export interface UIState {
   id: string;
   name: string;
@@ -81,6 +87,8 @@ export interface Outcome {
   condition?: string;
   /** null represents a deliberately sketched but unresolved branch. */
   target: OutcomeTarget | null;
+  /** Optional presentation hint; it never changes the branch destination. */
+  route?: EdgeRoute;
 }
 
 export interface Interaction {
@@ -94,6 +102,8 @@ export interface Interaction {
   /** null means the interaction is available from the node as a whole. */
   sourceStateId: string | null;
   outcomes: Outcome[];
+  /** Optional presentation hint for the source-screen-to-action connection. */
+  incomingRoute?: EdgeRoute;
 }
 
 export interface ProjectDocument {

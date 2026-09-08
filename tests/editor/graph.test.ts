@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { analyzeProject, checkoutProject, type ProjectDocument } from "../../src/domain";
+import { starterProject } from "../../src/domain/samples/starter";
 import {
   applyNodePositions,
   buildEditorEdges,
@@ -16,6 +17,75 @@ function cloneProject(): ProjectDocument {
 }
 
 describe("editor graph projection", () => {
+  it("attaches starter flow edges to the nearest side of each node", () => {
+    const edges = buildEditorEdges(structuredClone(starterProject));
+
+    expect(edges.find((edge) => edge.id === "edge:into:pay")).toMatchObject({
+      sourceHandle: "out-right",
+      targetHandle: "in-left",
+      type: "pathloom",
+    });
+    expect(edges.find((edge) => edge.id === "edge:pay-success")).toMatchObject({
+      sourceHandle: "out-right",
+      targetHandle: "in-left",
+      type: "pathloom",
+    });
+    expect(edges.find((edge) => edge.id === "edge:pay-declined")).toMatchObject({
+      sourceHandle: "out-right",
+      targetHandle: "in-left",
+      type: "pathloom",
+    });
+    expect(edges.find((edge) => edge.id === "edge:into:try-again")).toMatchObject({
+      sourceHandle: "out-left",
+      targetHandle: "in-right",
+      type: "pathloom",
+    });
+    expect(edges.find((edge) => edge.id === "edge:retry-checkout")).toMatchObject({
+      sourceHandle: "out-left",
+      targetHandle: "in-right",
+      type: "pathloom",
+    });
+  });
+
+  it("recomputes connector sides when nodes move across one another", () => {
+    const project = structuredClone(starterProject);
+    project.interactions.find((interaction) => interaction.id === "try-again")!.position = {
+      x: 1_050,
+      y: 460,
+    };
+    project.nodes.find((node) => node.id === "checkout")!.position = {
+      x: 1_390,
+      y: 160,
+    };
+
+    const edges = buildEditorEdges(project);
+
+    expect(edges.find((edge) => edge.id === "edge:into:try-again")).toMatchObject({
+      sourceHandle: "out-right",
+      targetHandle: "in-left",
+    });
+    expect(edges.find((edge) => edge.id === "edge:retry-checkout")).toMatchObject({
+      sourceHandle: "out-right",
+      targetHandle: "in-left",
+    });
+  });
+
+  it("projects persisted route hints onto their rendered edges", () => {
+    const project = structuredClone(starterProject);
+    const pay = project.interactions.find((interaction) => interaction.id === "pay")!;
+    pay.incomingRoute = { bendOffset: { x: 35, y: -20 } };
+    pay.outcomes[0].route = { bendOffset: { x: -15, y: 45 } };
+
+    const edges = buildEditorEdges(project);
+
+    expect(edges.find((edge) => edge.id === "edge:into:pay")?.data).toMatchObject({
+      route: { bendOffset: { x: 35, y: -20 } },
+    });
+    expect(edges.find((edge) => edge.id === "edge:pay-success")?.data).toMatchObject({
+      route: { bendOffset: { x: -15, y: 45 } },
+    });
+  });
+
   it("materializes every interaction and exposes exact source and target states", () => {
     const project = cloneProject();
     const nodes = buildEditorNodes(project, analyzeProject(project));

@@ -1,11 +1,11 @@
 .shell {
   width: 100vw;
   height: 100dvh;
-  min-width: 1040px;
+  min-width: 0;
   color: #17201d;
   background: #f6f7f3;
   display: grid;
-  grid-template-columns: 248px minmax(420px, 1fr) 336px;
+  grid-template-columns: 220px minmax(0, 1fr) 320px;
   grid-template-rows: 56px minmax(0, 1fr);
   overflow: hidden;
 }
@@ -526,6 +526,11 @@
   min-height: 0;
   background: #f6f7f3;
   overflow: hidden;
+}
+
+.graphSurface {
+  position: absolute;
+  inset: 0;
 }
 
 .coverageCanvas::after {
@@ -1335,7 +1340,7 @@
 
 @media (max-width: 1180px) {
   .shell {
-    grid-template-columns: 218px minmax(380px, 1fr) 300px;
+    grid-template-columns: 190px minmax(0, 1fr) 300px;
   }
 
   .topbar {
@@ -1359,56 +1364,22 @@
   }
 }
 
-@media (max-width: 1039px) {
+@media (max-width: 800px) {
   .shell {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr;
-    overflow: auto;
+    grid-template-columns: 156px minmax(220px, 1fr) 280px;
+    overflow-x: auto;
   }
+}
 
-  .shell > :not(.viewportGuard) {
-    display: none;
-  }
+.shell.previewShell {
+  --simulation-tray-height: 236px;
+  grid-template-columns: minmax(0, 1fr);
+}
 
-  .viewportGuard {
-    min-height: 100dvh;
-    padding: 32px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: #28322e;
-    background:
-      radial-gradient(circle at 50% 30%, rgba(102, 87, 217, 0.1), transparent 38%),
-      #f6f7f3;
-    text-align: center;
-  }
+.previewShell .canvas {
+  grid-column: 1;
+}
 
-  .viewportGuardIcon {
-    width: 52px;
-    height: 52px;
-    margin-bottom: 16px;
-    display: grid;
-    place-items: center;
-    border: 1px solid #d8d2f1;
-    border-radius: 15px;
-    color: #6657d9;
-    background: #f0edff;
-  }
-
-  .viewportGuard h1 {
-    margin: 0;
-    font-size: 22px;
-    letter-spacing: -0.03em;
-  }
-
-  .viewportGuard p {
-    max-width: 440px;
-    margin: 10px 0 0;
-    color: #6c746f;
-    font-size: 13px;
-    line-height: 1.55;
-  }
+.previewShell .graphSurface {
+  bottom: calc(var(--simulation-tray-height) + 28px);
 }

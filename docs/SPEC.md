@@ -1,10 +1,74 @@
 # Pathloom Product Spec and Delivery Plan
 
-Status: **MVP v0.1 — vertical slice implemented**
+Status: **v0.2 — simplified core implemented; ready for manual feedback**
 Last updated: **2026-09-07**
 Repository: [CodeTanim/Path-loom](https://github.com/CodeTanim/Path-loom)
 
 This document is the working contract for Pathloom. Product behavior is specified here before it is expanded in code. A milestone is complete only when its exit criteria pass.
+
+## Simplification pass — v0.2
+
+User testing shows the first release exposes too many concepts before the basic loop is clear. The next slice reduces the interface to **screen → action → outcomes → preview**.
+
+- One screen panel exposes its name, states, and actions together. Actions remain selectable and addable; advanced settings are optional.
+- One Preview control walks the modeled flow using actual screen/state names, not hard-coded payment mockups. It explicitly simulates branches, not a finished application or real requests.
+- Remove unavailable drawing tools and duplicate creation/mode controls. Keep checks secondary and describe findings without claiming exhaustive UX coverage.
+- Start new browsers with a small, valid example. Preserve existing browser drafts, undo/redo, and exact state targets. New actions default to all states and simple navigation.
+- Place added screens without overlap, expose basic deletion, and keep the editor accessible in narrower desktop panels.
+- Verify authoring, both success/error preview branches, back/restart, persistence, and structural checks before calling this slice complete. Freeform visual design, collaboration, import/export, and richer debugging stay deferred.
+
+Verification on 2026-09-07:
+
+- 40 automated tests, ESLint, TypeScript, and production build via `next build --webpack` pass. The default Turbopack build stalled in this restricted environment and was stopped; it is not recorded as passing.
+- Browser-tested payment success, decline, retry, back/restart; authored a separate Invite teammate screen with Idle/Error states and two outcomes; verified the new error branch reached its exact state.
+- Verified action selection stays open after creation, unfinished preview outcomes reopen their owning action, deletion can be undone, and saved changes survive reload.
+- Confirmed the existing localhost draft was retained. All write tests used a separate localhost:3001 origin. Verified the editor remains usable at 900px width.
+
+## Connector routing pass — v0.2.1
+
+Connections attach to the side of each card that faces the other endpoint. A
+backward recovery path therefore reads in its real direction instead of being
+forced through left-in/right-out ports. Selecting an arrow reveals one draggable
+routing handle; moving it changes only the line's bends, not its source or
+destination. Manual routes are saved as optional offsets in the Pathloom
+document, survive reload, and participate in Undo/Redo. Changing either endpoint
+resets that route so stale presentation data cannot obscure the new connection.
+
+In Preview, arrows retain their saved shape but routing controls stay hidden.
+The handle supports pointer dragging, arrow-key nudging, Escape to cancel, and a
+double-click reset.
+
+## Canvas preview follow-up — v0.2.2
+
+Preview stays on the flow canvas. Starting or restarting focuses the configured
+start screen and its initial state. A compact bottom tray provides actions,
+outcomes, Back, Restart, and journey history. Each choice or Back step centers
+the active screen, action, or unresolved outcome above the tray; the current
+step and traveled arrows are highlighted. Pan and zoom remain available while
+document editing and connector routing stay disabled. Exit returns to editing.
+Existing terminal, dead-end, invalid-reference, and state-specific branch
+behavior remains unchanged.
+
+Verified the payment decline/retry loop, Back, Restart, success completion,
+and zoom in the running browser. All 45 automated tests, ESLint, TypeScript,
+and the webpack production build pass.
+
+## States dropdown follow-up — v0.2.3
+
+Each screen can support several states and displays one at a time. A single
+States dropdown lists the supported presets with checkboxes. Checking a new
+state adds it and shows it on the canvas; clicking an existing state's name
+previews it without changing other states. The initial state has an Initial
+badge, and the current state can be made initial from the same dropdown.
+The separate add-state selector and inspector preview card are removed.
+Unchecking removes only unused states, with clear reasons when a state is
+needed by an action, outcome, or flow start. Existing custom states, exact
+branch targets, persistence, and Undo/Redo are preserved.
+
+Verified adding multiple states, changing the canvas preview, protected and
+unused state removal, Undo/Redo, initial-state selection, Escape/focus behavior,
+and reload persistence in an isolated browser draft. All 51 tests, ESLint,
+TypeScript, and the webpack production build pass.
 
 ## 1. Product definition
 

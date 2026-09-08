@@ -27,11 +27,14 @@ export type ScreenNodeData = {
   variant: ScreenPreviewVariant;
   stateLabel: string;
   stateCount: number;
+  description?: string;
   isStart?: boolean;
   canStartInteractions?: boolean;
   warning?: boolean | string;
   active?: boolean;
   dimmed?: boolean;
+  inputSides: ConnectorSide[];
+  outputSides: ConnectorSide[];
 };
 
 export type InteractionNodeData = {
@@ -41,7 +44,11 @@ export type InteractionNodeData = {
   outcomeCount: number;
   active?: boolean;
   dimmed?: boolean;
+  inputSides: ConnectorSide[];
+  outputSides: ConnectorSide[];
 };
+
+export type ConnectorSide = "left" | "right";
 
 export type PathloomScreenNode = Node<ScreenNodeData, "screen">;
 export type PathloomInteractionNode = Node<
@@ -51,6 +58,74 @@ export type PathloomInteractionNode = Node<
 
 const handleClassName =
   "nodrag nopan !size-3 !border-[3px] !border-[#fffefa] !bg-[#6657d9] shadow-[0_0_0_1px_rgba(102,87,217,0.35)] transition-transform hover:!scale-125";
+
+const connectorSides = ["left", "right"] as const;
+
+const handlePosition: Record<ConnectorSide, Position> = {
+  left: Position.Left,
+  right: Position.Right,
+};
+
+function handleOffset(type: "source" | "target") {
+  return { top: type === "target" ? "42%" : "58%" };
+}
+
+function handleVisibility(active: boolean, isConnectable: boolean) {
+  if (active) return "!opacity-100";
+  return isConnectable
+    ? "!opacity-0 group-hover:!opacity-55 hover:!opacity-100"
+    : "pointer-events-none !opacity-0";
+}
+
+function ConnectorHandles({
+  allowOutput = true,
+  inputSides,
+  isConnectable,
+  label,
+  outputSides,
+}: {
+  allowOutput?: boolean;
+  inputSides: ConnectorSide[];
+  isConnectable: boolean;
+  label: string;
+  outputSides: ConnectorSide[];
+}) {
+  return (
+    <>
+      {connectorSides.map((side) => (
+        <Handle
+          aria-label={`Connect an incoming path to ${label} from the ${side}`}
+          className={`${handleClassName} ${handleVisibility(inputSides.includes(side), isConnectable)}`}
+          id={`in-${side}`}
+          isConnectable={isConnectable}
+          isConnectableStart={false}
+          key={`in-${side}`}
+          position={handlePosition[side]}
+          style={handleOffset("target")}
+          title={`Incoming path to ${label}`}
+          type="target"
+        />
+      ))}
+      {connectorSides.map((side) => (
+        <Handle
+          aria-label={`Start an outgoing path from ${label} on the ${side}`}
+          className={`${handleClassName} ${handleVisibility(outputSides.includes(side), isConnectable && allowOutput)}`}
+          id={`out-${side}`}
+          isConnectable={isConnectable && allowOutput}
+          isConnectableEnd={false}
+          key={`out-${side}`}
+          position={handlePosition[side]}
+          style={{
+            ...handleOffset("source"),
+            zIndex: 2,
+          }}
+          title={`Outgoing path from ${label}`}
+          type="source"
+        />
+      ))}
+    </>
+  );
+}
 
 const stateTone: Record<ScreenPreviewVariant, string> = {
   checkout: "bg-[#eeebff] text-[#594bc7]",
@@ -92,7 +167,6 @@ export function ScreenNode({
   const accessibleLabel = [
     data.isStart ? "Start screen" : "Screen",
     data.label,
-    `route ${data.route}`,
     `current state ${data.stateLabel}`,
     stateCountLabel,
     data.warning ? warningText : undefined,
@@ -104,17 +178,15 @@ export function ScreenNode({
   return (
     <div
       aria-label={accessibleLabel}
-      className={`relative w-[246px] rounded-[16px] border bg-[#fffefa] p-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
+      className={`group relative w-[246px] rounded-[16px] border bg-[#fffefa] p-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
       role="group"
     >
-      <Handle
-        aria-label={`Connect an incoming path to ${data.label}`}
-        className={handleClassName}
-        id="in"
+      <ConnectorHandles
+        allowOutput={data.canStartInteractions !== false}
+        inputSides={data.inputSides}
         isConnectable={isConnectable}
-        position={Position.Left}
-        title={`Incoming path to ${data.label}`}
-        type="target"
+        label={data.label}
+        outputSides={data.outputSides}
       />
 
       <div className="mb-2 flex items-start justify-between gap-2 px-0.5">
@@ -127,7 +199,7 @@ export function ScreenNode({
               {data.label}
             </span>
             <span className="block truncate font-mono text-[8.5px] leading-[13px] text-[#87847c]">
-              {data.route}
+              Screen
             </span>
           </span>
         </div>
@@ -152,7 +224,13 @@ export function ScreenNode({
         </div>
       </div>
 
-      <ScreenPreview compact variant={data.variant} />
+      <ScreenPreview
+        compact
+        description={data.description}
+        screenName={data.label}
+        stateName={data.stateLabel}
+        variant={data.variant}
+      />
 
       <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
         <span
@@ -173,17 +251,6 @@ export function ScreenNode({
         </span>
       )}
 
-      {data.canStartInteractions !== false && (
-        <Handle
-          aria-label={`Start an outgoing path from ${data.label}`}
-          className={handleClassName}
-          id="out"
-          isConnectable={isConnectable}
-          position={Position.Right}
-          title={`Outgoing path from ${data.label}`}
-          type="source"
-        />
-      )}
     </div>
   );
 }
@@ -199,17 +266,14 @@ export function InteractionNode({
   return (
     <div
       aria-label={`Interaction ${data.label}, trigger ${data.trigger}, from ${data.sourceStateLabel}, ${outcomeLabel}${data.active ? ", active in simulation" : ""}`}
-      className={`relative w-[202px] rounded-[14px] border bg-[#fffefa] px-3 py-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
+      className={`group relative w-[202px] rounded-[14px] border bg-[#fffefa] px-3 py-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
       role="group"
     >
-      <Handle
-        aria-label={`Connect an incoming path to the ${data.label} interaction`}
-        className={handleClassName}
-        id="in"
+      <ConnectorHandles
+        inputSides={data.inputSides}
         isConnectable={isConnectable}
-        position={Position.Left}
-        title={`Incoming path to ${data.label}`}
-        type="target"
+        label={`${data.label} interaction`}
+        outputSides={data.outputSides}
       />
 
       <div className="flex items-center gap-2.5">
@@ -242,15 +306,6 @@ export function InteractionNode({
         </span>
       )}
 
-      <Handle
-        aria-label={`Start an outcome path from the ${data.label} interaction`}
-        className={handleClassName}
-        id="out"
-        isConnectable={isConnectable}
-        position={Position.Right}
-        title={`Outcome path from ${data.label}`}
-        type="source"
-      />
     </div>
   );
 }
