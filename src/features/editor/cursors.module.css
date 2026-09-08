@@ -1,0 +1,28 @@
+/* The doubled local class outranks the existing canvas cursor rules, regardless
+   of stylesheet order. The hotspot is the arrow's top-left tip in the SVG. */
+.canvasCursor.canvasCursor :global(.react-flow__pane:not(.dragging)),
+.canvasCursor.canvasCursor :global(.react-flow__node.selectable:not(.dragging)),
+.canvasCursor.canvasCursor :global(.react-flow__node.draggable:not(.dragging)) {
+  cursor: url("/cursors/pathloom-pointer.svg") 3 2, default;
+}
+
+.canvasCursor.canvasCursor :global(.react-flow__pane.dragging),
+.canvasCursor.canvasCursor :global(.react-flow__node.draggable.dragging) {
+  cursor: grabbing;
+}
+
+/* Respect the operating system's high-contrast cursor choice. Descendant
+   buttons, text fields, connectors, and edge grips keep their own cursors. */
+@media (forced-colors: active) {
+  .canvasCursor.canvasCursor :global(.react-flow__pane:not(.dragging)) {
+    cursor: grab;
+  }
+
+  .canvasCursor.canvasCursor :global(.react-flow__node.selectable:not(.dragging)) {
+    cursor: pointer;
+  }
+
+  .canvasCursor.canvasCursor :global(.react-flow__node.draggable:not(.dragging)) {
+    cursor: grab;
+  }
+}

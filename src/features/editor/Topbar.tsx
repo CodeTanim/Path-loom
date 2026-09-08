@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -15,6 +16,9 @@ export type EditorMode = "design" | "simulate";
 export type SaveStatus = "saving" | "saved" | "failed";
 
 interface TopbarProps {
+  onExit: () => void;
+  extraActions?: ReactNode;
+  saveLabel?: string;
   projectLabel?: string;
   flowLabel?: string;
   saveStatus?: SaveStatus;
@@ -32,6 +36,9 @@ interface TopbarProps {
 }
 
 export function Topbar({
+  onExit,
+  extraActions,
+  saveLabel: suppliedSaveLabel,
   projectLabel = "Pathloom",
   flowLabel = "Your flow",
   saveStatus = "saved",
@@ -46,17 +53,19 @@ export function Topbar({
   onRun,
   onStop,
 }: TopbarProps) {
-  const saveLabel =
+  const saveLabel = suppliedSaveLabel ?? (
     saveStatus === "failed"
       ? "Local save failed"
       : saveStatus === "saving"
         ? "Saving in this browser"
-        : "Saved in this browser";
+        : "Saved in this browser");
 
   return (
     <header className={`${styles.topbar} ${shellStyles.topbar}`}>
       <div className={styles.brandGroup}>
-        <BrandMark />
+        <button className={shellStyles.projectsButton} onClick={onExit} type="button" title="Back to your flows" aria-label="Back to your flows">
+          <ArrowLeft aria-hidden="true" size={15} /><BrandMark />
+        </button>
         <span aria-hidden="true" className={styles.brandDivider} />
         <span
           className={shellStyles.flowName}
@@ -83,28 +92,31 @@ export function Topbar({
       </div>
 
       <div className={styles.topbarActions}>
+        {extraActions}
         {mode === "design" && (
           <>
-            <button
-              aria-label="Undo"
-              className={styles.iconButton}
-              disabled={!canUndo}
-              onClick={onUndo}
-              title="Undo (⌘Z)"
-              type="button"
-            >
-              <Undo2 aria-hidden="true" size={15} />
-            </button>
-            <button
-              aria-label="Redo"
-              className={styles.iconButton}
-              disabled={!canRedo}
-              onClick={onRedo}
-              title="Redo (⇧⌘Z)"
-              type="button"
-            >
-              <Redo2 aria-hidden="true" size={15} />
-            </button>
+            <div className={shellStyles.historyGroup}>
+              <button
+                aria-label="Undo"
+                className={styles.iconButton}
+                disabled={!canUndo}
+                onClick={onUndo}
+                title="Undo (⌘Z)"
+                type="button"
+              >
+                <Undo2 aria-hidden="true" size={15} />
+              </button>
+              <button
+                aria-label="Redo"
+                className={styles.iconButton}
+                disabled={!canRedo}
+                onClick={onRedo}
+                title="Redo (⇧⌘Z)"
+                type="button"
+              >
+                <Redo2 aria-hidden="true" size={15} />
+              </button>
+            </div>
 
             <button
               aria-pressed={coverageOpen}

@@ -57,7 +57,7 @@ export type PathloomInteractionNode = Node<
 >;
 
 const handleClassName =
-  "nodrag nopan !size-3 !border-[3px] !border-[#fffefa] !bg-[#6657d9] shadow-[0_0_0_1px_rgba(102,87,217,0.35)] transition-transform hover:!scale-125";
+  "nodrag nopan !size-3 !border-[3px] !border-white !bg-[#16845c] shadow-[0_0_0_1px_rgba(22,132,92,0.35)] transition-transform hover:!scale-125";
 
 const connectorSides = ["left", "right"] as const;
 
@@ -147,10 +147,10 @@ function nodeFrameClass({
   selected: boolean;
 }) {
   const border = active
-    ? "border-[#ee6f4d] shadow-[0_0_0_3px_rgba(238,111,77,0.14),0_12px_28px_rgba(25,27,31,0.12)]"
+    ? "border-[#de6847] shadow-[0_0_0_1px_#de6847,0_2px_5px_rgba(0,0,0,0.08)]"
     : selected
-      ? "border-[#6657d9] shadow-[0_0_0_3px_rgba(102,87,217,0.13),0_10px_25px_rgba(25,27,31,0.1)]"
-      : "border-[#d9d7cf] shadow-[0_7px_20px_rgba(25,27,31,0.09)] hover:border-[#c7c4bb] hover:shadow-[0_10px_26px_rgba(25,27,31,0.11)]";
+      ? "border-[#16845c] shadow-[0_0_0_1px_#16845c,0_2px_5px_rgba(0,0,0,0.06)]"
+      : "border-[#c9c9c9] shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:border-[#999999]";
 
   return `${border} ${dimmed ? "opacity-35 grayscale-[0.35]" : "opacity-100"}`;
 }
@@ -178,7 +178,7 @@ export function ScreenNode({
   return (
     <div
       aria-label={accessibleLabel}
-      className={`group relative w-[246px] rounded-[16px] border bg-[#fffefa] p-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
+      className={`group relative w-[246px] rounded-[4px] border bg-white p-2.5 text-[#252525] transition-[border-color,box-shadow,opacity,filter] duration-150 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
       role="group"
     >
       <ConnectorHandles
@@ -191,14 +191,14 @@ export function ScreenNode({
 
       <div className="mb-2 flex items-start justify-between gap-2 px-0.5">
         <div className="flex min-w-0 items-start gap-2">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#f0efeb] text-[#5e6066]">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-[4px] bg-[#f0f0f0] text-[#626262]">
             <Monitor className="size-3.5" strokeWidth={2.1} aria-hidden="true" />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-[12px] font-semibold leading-[16px] tracking-[-0.015em]">
               {data.label}
             </span>
-            <span className="block truncate font-mono text-[8.5px] leading-[13px] text-[#87847c]">
+            <span className="block truncate text-[8.5px] leading-[13px] text-[#757575]">
               Screen
             </span>
           </span>
@@ -206,7 +206,7 @@ export function ScreenNode({
 
         <div className="flex shrink-0 items-center gap-1">
           {data.isStart && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#191b1f] px-1.5 py-1 text-[7px] font-bold uppercase leading-none tracking-[0.08em] text-white">
+            <span className="inline-flex items-center gap-1 rounded-[3px] bg-[#e3f5ec] px-1.5 py-1 text-[7px] font-bold uppercase leading-none tracking-[0.06em] text-[#226349]">
               <Play className="size-2 fill-current" strokeWidth={2.4} aria-hidden="true" />
               Start
             </span>
@@ -234,12 +234,12 @@ export function ScreenNode({
 
       <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
         <span
-          className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-1 text-[8px] font-semibold leading-none ${stateTone[data.variant]}`}
+          className={`inline-flex min-w-0 items-center gap-1 rounded-[3px] px-2 py-1 text-[8px] font-semibold leading-none ${stateTone[data.variant]}`}
         >
           <CircleDot className="size-2.5 shrink-0" strokeWidth={2.5} aria-hidden="true" />
           <span className="truncate">{data.stateLabel}</span>
         </span>
-        <span className="shrink-0 text-[8px] font-medium text-[#817e76]">
+        <span className="shrink-0 text-[8px] font-medium text-[#707070]">
           {stateCountLabel}
         </span>
       </div>
@@ -266,7 +266,7 @@ export function InteractionNode({
   return (
     <div
       aria-label={`Interaction ${data.label}, trigger ${data.trigger}, from ${data.sourceStateLabel}, ${outcomeLabel}${data.active ? ", active in simulation" : ""}`}
-      className={`group relative w-[202px] rounded-[14px] border bg-[#fffefa] px-3 py-2.5 text-[#191b1f] transition-[border-color,box-shadow,opacity,filter] duration-200 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
+      className={`group relative w-[202px] rounded-[4px] border bg-white px-3 py-2.5 text-[#252525] transition-[border-color,box-shadow,opacity,filter] duration-150 ${nodeFrameClass({ active: data.active, dimmed: data.dimmed, selected })}`}
       role="group"
     >
       <ConnectorHandles
@@ -277,7 +277,7 @@ export function InteractionNode({
       />
 
       <div className="flex items-center gap-2.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-[#eeebff] text-[#594bc7]">
+        <span className="grid size-8 shrink-0 place-items-center rounded-[4px] bg-[#eeebff] text-[#594bc7]">
           <MousePointerClick className="size-4" strokeWidth={2.1} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
@@ -285,7 +285,7 @@ export function InteractionNode({
             {data.label}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="max-w-[86px] truncate rounded-[4px] bg-[#f1f0eb] px-1.5 py-0.5 font-mono text-[7.5px] font-medium leading-[11px] text-[#676970]">
+            <span className="max-w-[86px] truncate rounded-[3px] bg-[#f0f0f0] px-1.5 py-0.5 font-mono text-[7.5px] font-medium leading-[11px] text-[#676970]">
               {data.trigger}
             </span>
             <span className="inline-flex shrink-0 items-center gap-0.5 text-[7.5px] font-semibold text-[#6657d9]">
@@ -293,7 +293,7 @@ export function InteractionNode({
               {outcomeLabel}
             </span>
           </div>
-          <div className="mt-1 truncate text-[7.5px] font-medium text-[#85827b]">
+          <div className="mt-1 truncate text-[7.5px] font-medium text-[#737373]">
             From {data.sourceStateLabel}
           </div>
         </div>

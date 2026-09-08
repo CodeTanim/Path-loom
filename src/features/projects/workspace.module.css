@@ -1,0 +1,110 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  background: var(--ui-chrome);
+}
+
+.workspace > main {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #ecc7af;
+  color: #8a3f20;
+  background: #fff3e9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.banner button,
+.message button,
+.cloudButton {
+  padding: 6px 10px;
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  color: #404040;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.banner button:hover,
+.message button:hover {
+  border-color: #a3a3a3;
+  background: #f5f5f5;
+}
+
+.cloudButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border-color: var(--ui-border);
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+
+.cloudButton:hover:not(:disabled) {
+  border-color: #47735d;
+  background: #2c4d3e;
+}
+
+.cloudButton:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.banner button:focus-visible,
+.message button:focus-visible,
+.message a:focus-visible {
+  outline: 2px solid #258663;
+  outline-offset: 3px;
+}
+
+.cloudButton:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
+
+.message {
+  display: grid;
+  gap: 20px;
+  max-width: 650px;
+  margin: 15vh auto;
+  padding: 28px;
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  color: #404040;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.message h1 {
+  color: #262626;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+
+.message a {
+  color: #286148;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .banner { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .message { margin: 10vh 20px; padding: 24px; }
+}

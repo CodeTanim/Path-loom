@@ -136,7 +136,7 @@ export function LeftSidebar({
             Load example
           </button>
         )}
-        <small>Your flow saves automatically in this browser. It is not synced across devices.</small>
+        <small>Your flow saves automatically in this browser. Check the toolbar for its save and sync status.</small>
       </div>
     </aside>
   );

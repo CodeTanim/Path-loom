@@ -1,0 +1,111 @@
+.signInButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  background: var(--ui-field);
+  color: var(--ui-text);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.signInButton:hover {
+  border-color: #565656;
+  background: #3a3a3a;
+}
+
+.signInButton:focus-visible,
+.guestLink:focus-visible,
+.brand:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
+
+.guestLabel {
+  padding: 4px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  color: var(--ui-muted);
+  background: var(--ui-panel);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.userControl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  height: 100dvh;
+  overflow: auto;
+  padding: 48px 24px;
+  background: #f5f5f5;
+  color: #262626;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.intro {
+  max-width: 440px;
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 13px;
+  color: #737373;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.intro h1 {
+  margin: 0 0 12px;
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.intro > p:last-child {
+  margin: 0;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.guestLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #286148;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.guestLink:hover {
+  text-decoration: underline;
+}
+
+.page .guestLink:focus-visible,
+.page .brand:focus-visible {
+  outline-color: #258663;
+}

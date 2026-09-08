@@ -3,7 +3,7 @@
 :root {
   --font-geist-sans: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
   --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --background: #f5f4ef;
+  --background: #ededed;
   --foreground: #191b1f;
   --ink: #191b1f;
   --muted: #696b72;
@@ -20,6 +20,18 @@
   --amber-soft: #fff2d8;
   --danger: #b7473f;
   --danger-soft: #fae9e6;
+  /* Shared editor chrome, separate from screen/outcome semantic colors. */
+  --ui-chrome: #1e1e1e;
+  --ui-panel: #252525;
+  --ui-field: #303030;
+  --ui-border: #3b3b3b;
+  --ui-text: #f0f0f0;
+  --ui-muted: #b1b1b1;
+  --ui-subtle: #909090;
+  --ui-accent: #72e4b1;
+  --ui-accent-ink: #143529;
+  --ui-accent-soft: #243f34;
+  --ui-canvas: #e5e5e5;
 }
 
 @theme inline {
@@ -53,6 +65,6 @@ button {
 }
 
 ::selection {
-  background: #d9d3ff;
+  background: #c4efdc;
   color: var(--ink);
 }

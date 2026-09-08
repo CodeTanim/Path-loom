@@ -366,7 +366,7 @@ export function EditableEdge({
           <button
             aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Delete Escape Enter"
             aria-label={`Drag to reroute ${routeLabel}`}
-            className="nodrag nopan grid size-5 cursor-grab touch-none place-items-center rounded-full border-[3px] border-[#fffefa] bg-[#6657d9] shadow-[0_2px_8px_rgba(49,40,125,0.35)] transition-transform hover:scale-110 active:cursor-grabbing active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6657d9]"
+            className="nodrag nopan grid size-5 cursor-grab touch-none place-items-center rounded-[4px] border-[3px] border-white bg-[#16845c] shadow-[0_1px_4px_rgba(0,0,0,0.2)] transition-transform hover:scale-110 active:cursor-grabbing active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16845c]"
             onBlur={() => commitKeyboardRoute()}
             onDoubleClick={(event) => {
               event.preventDefault();

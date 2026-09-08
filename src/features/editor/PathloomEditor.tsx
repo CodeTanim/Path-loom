@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import {
   Background,
@@ -28,7 +29,6 @@ import {
 
 import {
   analyzeProject,
-  parsePathloomDocument,
   type AnalysisIssue,
   type CoreUIStateKind,
   type FlowNode,
@@ -48,7 +48,7 @@ import {
   type SimulationCursor,
 } from "./SimulationTray";
 import { SimulationViewport, simulationFocusId } from "./SimulationViewport";
-import { Topbar, type EditorMode, type SaveStatus } from "./Topbar";
+import { Topbar, type EditorMode } from "./Topbar";
 import { screenNodeTypes } from "./components/FlowNodes";
 import {
   pathloomEdgeTypes,
@@ -56,6 +56,7 @@ import {
   type RouteCommit,
 } from "./components/EditableEdge";
 import styles from "./editor.module.css";
+import cursorStyles from "./cursors.module.css";
 import {
   applyNodePositions,
   buildEditorEdges,
@@ -67,7 +68,6 @@ import {
   variantForState,
 } from "./graph";
 
-const STORAGE_KEY = "pathloom:v1:project:checkout-recovery";
 const HISTORY_LIMIT = 50;
 
 const OUTCOME_TARGET_KINDS: Partial<Record<OutcomeKind, CoreUIStateKind>> = {
@@ -77,9 +77,6 @@ const OUTCOME_TARGET_KINDS: Partial<Record<OutcomeKind, CoreUIStateKind>> = {
   offline: "offline",
   unauthorized: "unauthorized",
 };
-
-const initialAnalysis = analyzeProject(starterProject);
-const initialNodes = buildEditorNodes(starterProject, initialAnalysis);
 
 interface EditorSnapshot {
   project: ProjectDocument;
@@ -184,28 +181,34 @@ function issueFocusId(issue: AnalysisIssue) {
   }
 }
 
-export function PathloomEditor() {
-  const [project, setProject] = useState<ProjectDocument>(starterProject);
+interface PathloomEditorProps {
+  initialProject: ProjectDocument;
+  onPersist: (document: ProjectDocument) => void;
+  onExit: () => void;
+  saveLabel?: string;
+  extraActions?: ReactNode;
+}
+
+export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, extraActions }: PathloomEditorProps) {
+  const [project, setProject] = useState<ProjectDocument>(initialProject);
   const analysis = useMemo(() => analyzeProject(project), [project]);
+  const [initialNodes] = useState(() => buildEditorNodes(initialProject, analyzeProject(initialProject)));
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [selectedId, setSelectedId] = useState<string | null>(
-    starterProject.entryNodeId,
+    initialProject.entryNodeId,
   );
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [focusedOutcomeId, setFocusedOutcomeId] = useState<string | null>(null);
   const [mode, setMode] = useState<EditorMode>("design");
   const [coverageOpen, setCoverageOpen] = useState(false);
-  const [previewStateIds, setPreviewStateIds] = useState<Record<string, string>>({
-    checkout: "checkout-idle",
-  });
+  const [previewStateIds, setPreviewStateIds] = useState<Record<string, string>>({});
   const [past, setPast] = useState<EditorSnapshot[]>([]);
   const [future, setFuture] = useState<EditorSnapshot[]>([]);
   const [simulation, setSimulation] = useState<SimulationState>(() =>
-    initialSimulation(starterProject),
+    initialSimulation(initialProject),
   );
   const [simulationPast, setSimulationPast] = useState<SimulationState[]>([]);
   const [toast, setToast] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saving");
 
   const projectRef = useRef(project);
   const nodesRef = useRef(nodes);
@@ -213,7 +216,14 @@ export function PathloomEditor() {
   const flowRef = useRef<ReactFlowInstance<Node, PathloomEdge> | null>(null);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
   const toastTimerRef = useRef<number | null>(null);
-  const hydratedRef = useRef(false);
+
+  const persist = useCallback((document: ProjectDocument) => {
+    try {
+      onPersist(document);
+    } catch {
+      // The project workspace keeps edits in memory and displays save recovery.
+    }
+  }, [onPersist]);
 
   useEffect(() => {
     projectRef.current = project;
@@ -250,52 +260,6 @@ export function PathloomEditor() {
     [],
   );
 
-  useEffect(() => {
-    const hydrationTimer = window.setTimeout(() => {
-      try {
-        const saved = window.localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = parsePathloomDocument(saved);
-          if (!parsed) {
-            window.localStorage.removeItem(STORAGE_KEY);
-            showToast("Invalid local draft was cleared; loaded the demo flow");
-          } else if (
-            JSON.stringify(parsed) !== JSON.stringify(projectRef.current)
-          ) {
-            const nextAnalysis = analyzeProject(parsed);
-            const nextNodes = buildEditorNodes(parsed, nextAnalysis);
-            projectRef.current = parsed;
-            nodesRef.current = nextNodes;
-            setProject(parsed);
-            setNodes(nextNodes);
-            setSelectedId(parsed.entryNodeId);
-            setSimulation(initialSimulation(parsed));
-            window.setTimeout(() => flowRef.current?.fitView({ padding: 0.15, maxZoom: 0.95 }), 80);
-          }
-        }
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("failed");
-        showToast("Local storage is unavailable; edits remain in this tab");
-      } finally {
-        hydratedRef.current = true;
-      }
-    }, 0);
-    return () => window.clearTimeout(hydrationTimer);
-  }, [setNodes, showToast]);
-
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-    let statusTimer: number;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-      statusTimer = window.setTimeout(() => setSaveStatus("saved"), 0);
-    } catch {
-      statusTimer = window.setTimeout(() => setSaveStatus("failed"), 0);
-    }
-    return () => window.clearTimeout(statusTimer);
-  }, [project]);
-
   const pushPast = useCallback((snapshot: EditorSnapshot) => {
     setPast((current) => [...current.slice(-(HISTORY_LIMIT - 1)), snapshot]);
     setFuture([]);
@@ -306,11 +270,12 @@ export function PathloomEditor() {
       projectRef.current = snapshot.project;
       nodesRef.current = cloneNodes(snapshot.nodes);
       setProject(snapshot.project);
+      persist(snapshot.project);
       setNodes(cloneNodes(snapshot.nodes));
       setSelectedId(snapshot.selectedId);
       setSelectedEdgeId(null);
     },
-    [setNodes],
+    [persist, setNodes],
   );
 
   const commitProject = useCallback(
@@ -331,11 +296,11 @@ export function PathloomEditor() {
       nodesRef.current = nextNodes;
       setProject(positionedProject);
       setNodes(nextNodes);
-      setSaveStatus("saving");
+      persist(positionedProject);
       if (message) showToast(message);
       return true;
     },
-    [pushPast, requireDesignMode, selectedId, setNodes, showToast],
+    [persist, pushPast, requireDesignMode, selectedId, setNodes, showToast],
   );
 
   const commitEdgeRoute = useCallback<RouteCommit>(
@@ -450,7 +415,7 @@ export function PathloomEditor() {
   const loadExample = useCallback(() => {
     if (!requireDesignMode()) return;
     if (!window.confirm("Replace this flow with the payment example? You can Undo this change before closing the tab.")) return;
-    commitProject(structuredClone(starterProject), "Example loaded — Undo restores your previous flow", true);
+    commitProject({ ...structuredClone(starterProject), id: projectRef.current.id }, "Example loaded — Undo restores your previous flow", true);
     setSelectedId(starterProject.entryNodeId);
     setSelectedEdgeId(null);
     setPreviewStateIds({});
@@ -1657,9 +1622,9 @@ export function PathloomEditor() {
       projectRef.current = nextProject;
       setNodes(refreshedNodes);
       setProject(nextProject);
-      setSaveStatus("saving");
+      persist(nextProject);
     },
-    [pushPast, setNodes],
+    [persist, pushPast, setNodes],
   );
 
   const handleNodesChange = useCallback<OnNodesChange<Node>>(
@@ -1713,6 +1678,9 @@ export function PathloomEditor() {
   return (
     <main className={`${styles.shell} ${mode === "simulate" ? styles.previewShell : ""}`}>
       <Topbar
+        onExit={onExit}
+        extraActions={extraActions}
+        saveLabel={saveLabel}
         canRedo={mode === "design" && future.length > 0}
         canUndo={mode === "design" && past.length > 0}
         coverageOpen={coverageOpen}
@@ -1734,7 +1702,7 @@ export function PathloomEditor() {
         }}
         onUndo={undo}
         projectLabel="Local project"
-        saveStatus={saveStatus}
+        saveStatus={saveLabel === "Local save failed" ? "failed" : saveLabel?.startsWith("Saving") ? "saving" : "saved"}
       />
 
       {mode === "design" && <LeftSidebar
@@ -1749,7 +1717,7 @@ export function PathloomEditor() {
 
       <section
         aria-label="Flow canvas"
-        className={`${styles.canvas} ${coverageOpen ? styles.coverageCanvas : ""}`}
+        className={`${styles.canvas} ${cursorStyles.canvasCursor} ${coverageOpen ? styles.coverageCanvas : ""}`}
       >
         <div
           className={`${styles.canvasModeLabel} ${coverageOpen ? styles.coverageModeLabel : ""}`}
@@ -1831,7 +1799,7 @@ export function PathloomEditor() {
         >
           <SimulationViewport cursor={mode === "simulate" ? simulation.cursor : null} />
           <Background
-            color={coverageOpen ? "#d9b267" : "#b8c1ba"}
+            color={coverageOpen ? "#c8ae7d" : "#bfc0c2"}
             gap={20}
             size={1.05}
             variant={BackgroundVariant.Dots}
@@ -1863,7 +1831,7 @@ export function PathloomEditor() {
         )}
         {toast && (
           <div aria-live="polite" className={styles.toast} role="status">
-            <CheckCircle2 aria-hidden="true" color="#2f8f61" size={13} />
+            <CheckCircle2 aria-hidden="true" color="var(--ui-accent)" size={13} />
             {toast}
           </div>
         )}

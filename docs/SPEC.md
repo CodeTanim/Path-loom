@@ -1,6 +1,6 @@
 # Pathloom Product Spec and Delivery Plan
 
-Status: **v0.2 — simplified core implemented; ready for manual feedback**
+Status: **v0.3 — project workspace implemented; cloud setup and live verification pending**
 Last updated: **2026-09-07**
 Repository: [CodeTanim/Path-loom](https://github.com/CodeTanim/Path-loom)
 
@@ -70,7 +70,71 @@ unused state removal, Undo/Redo, initial-state selection, Escape/focus behavior,
 and reload persistence in an isolated browser draft. All 51 tests, ESLint,
 TypeScript, and the webpack production build pass.
 
+## Project workspace milestone — v0.3
+
+The home page becomes a project dashboard with guest access: start a blank flow,
+try the example, reopen, rename, and duplicate local projects. Existing v0.2
+browser drafts migrate without deleting their original data. Each project has
+its own editor URL and independent saved content.
+
+Optional sign-in enables private cloud projects. A guest can explicitly save
+their current draft online without losing local work. Subsequent edits save
+locally first and synchronize online; failed writes stay available for retry.
+Account caches are isolated, every server query checks the authenticated owner,
+and revision conflicts preserve local edits rather than silently overwriting.
+Signed-out users can continue creating and editing local flows.
+
+Use Clerk authentication and Neon Postgres unless an existing service is
+specified. Cloud operations remain visibly unavailable until credentials and
+the database migration are configured; no simulated login or cloud saves.
+AI scenario suggestions are postponed by user request and excluded from this
+milestone.
+
+Acceptance: test migration, multiple independent flows, rename/duplicate,
+guest editing/reload, sign-in configuration states, server auth/ownership,
+optimistic revisions, retry/conflict handling, and unchanged canvas simulation.
+Live account and database verification requires configured service credentials.
+
+Verification on 2026-09-07:
+
+- 138 automated tests, ESLint, TypeScript, and the webpack production build pass.
+- Browser-tested blank creation, screen rename, multiple states, dashboard return,
+  duplication, project rename, search, reopening, and full reload persistence.
+- The payment example starts on the canvas, exposes its outcomes, and reaches
+  Confirmation / Flow complete. No browser warnings or errors were captured.
+- Tests cover preserved legacy drafts, corrupt-library protection, account cache
+  separation, ownership checks, revision conflicts, in-flight edits, JSONB key
+  reordering, and bounded requests. Cross-tab writes are guarded before local
+  save, initial upload, and save acknowledgement.
+- The unconfigured private API returns 503 with private/no-store headers; the
+  sign-in page explains guest mode. The migration runner exits with a clear
+  DATABASE_URL requirement. No real auth or database transaction was tested;
+  those checks remain pending until the services are configured.
+- Browser writes used an isolated 127.0.0.1:3002 origin, leaving the main local
+  workspace draft untouched. No services were provisioned and no AI is included.
+
 ## 1. Product definition
+
+### Visual refinement — Figma-inspired editor chrome
+
+Presentation-only pass: charcoal toolbar and side panels, compact layer rows
+and property controls, restrained mint accents, neutral gray canvas, flatter
+screen cards, and a matching preview tray. The dashboard uses the same chrome
+with neutral file cards. Keep Pathloom's identity and semantic state colors.
+No new tools, features, tabs, workflows, data changes, or authentication changes.
+Existing authoring, routing, preview, storage, and keyboard behavior is retained.
+
+Verified the dashboard, editor, States dropdown, and on-canvas decline preview
+in the production browser at normal and 900px desktop widths. No browser
+warnings/errors were captured; all 138 tests, lint, TypeScript, and the webpack
+production build pass. This pass adds no dependencies or services.
+
+Contrast/cursor follow-up: sidebars use white headings, near-white labels and
+help text, and brighter secondary details; mint selection and semantic colors
+remain unchanged. An original outlined arrow cursor is scoped to the canvas
+and cards. Dragging retains the grabbing cursor; form fields, buttons, connection
+handles, and route grips retain their existing cursors. Forced-colors mode uses
+native cursor fallbacks. No interaction or persistence behavior changes.
 
 Pathloom is a lightweight design and prototyping tool for user flows, application states, and edge cases.
 
