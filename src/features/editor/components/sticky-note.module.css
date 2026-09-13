@@ -1,0 +1,128 @@
+.note {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  border: 1px solid #ddc66d;
+  border-radius: 3px;
+  background: #fff2ad;
+  color: #403719;
+  box-shadow: 0 2px 5px rgb(64 55 25 / 12%);
+}
+
+.selected {
+  border-color: #987721;
+  box-shadow: 0 0 0 1px #987721, 0 3px 8px rgb(64 55 25 / 14%);
+}
+
+.header {
+  display: flex;
+  min-height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 4px 11px;
+  border-bottom: 1px solid rgb(130 104 30 / 14%);
+  border-radius: 2px 2px 0 0;
+  background: #f7e696;
+  user-select: none;
+}
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.deleteButton {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #655222;
+  cursor: pointer;
+}
+
+.deleteButton:hover {
+  background: rgb(130 104 30 / 13%);
+  color: #3f3212;
+}
+
+.text {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: #403719;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: text;
+  resize: none;
+  overscroll-behavior: contain;
+}
+
+.text::placeholder {
+  color: #796a3b;
+  opacity: 1;
+}
+
+.text:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(152 119 33 / 45%);
+}
+
+.footer {
+  flex-shrink: 0;
+  padding: 0 25px 7px 12px;
+  color: #796a3b;
+  font-size: 9px;
+  line-height: 13px;
+  user-select: none;
+}
+
+/* Outrank React Flow's built-in tiny handle without affecting other nodes. */
+.resizeControl.resizeControl {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  transform: translate(-70%, -70%);
+}
+
+.resizeButton {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid #c4a443;
+  border-radius: 3px;
+  background: #f7e696;
+  color: #655222;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.resizeButton:hover {
+  background: #f0da7f;
+}
+
+.deleteButton:focus-visible,
+.resizeButton:focus-visible {
+  outline: 2px solid #655222;
+  outline-offset: 2px;
+}

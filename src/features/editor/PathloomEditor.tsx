@@ -7,12 +7,14 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   Background,
   BackgroundVariant,
   Controls,
   ReactFlow,
+  applyNodeChanges,
   useNodesState,
   type Connection,
   type Node,
@@ -25,11 +27,25 @@ import {
   CheckCircle2,
   GitBranch,
   Scan,
+  StickyNote as StickyNoteIcon,
 } from "lucide-react";
 
 import {
   analyzeProject,
+  getExplorationSummary,
+  getNextUnexploredCheck,
+  recordExploredOutcome,
+  reconcileExploration,
+  STICKY_NOTE_DEFAULT_WIDTH,
+  STICKY_NOTE_DEFAULT_HEIGHT,
+  STICKY_NOTE_LIMIT,
+  STICKY_NOTE_MAX_TEXT_LENGTH,
+  STICKY_NOTE_MIN_WIDTH,
+  STICKY_NOTE_MIN_HEIGHT,
+  STICKY_NOTE_MAX_WIDTH,
+  STICKY_NOTE_MAX_HEIGHT,
   type AnalysisIssue,
+  type CanvasPosition,
   type CoreUIStateKind,
   type FlowNode,
   type FlowNodeKind,
@@ -38,10 +54,12 @@ import {
   type OutcomeKind,
   type ProjectDocument,
   type UIState,
+  type StickyNote,
 } from "@/domain";
 import { starterProject } from "@/domain/samples/starter";
 import { freeScreenPosition, removeUnusedState } from "./authoring";
 import { Inspector } from "./Inspector";
+import { ExplorationPanel } from "./ExplorationPanel";
 import { LeftSidebar } from "./LeftSidebar";
 import {
   SimulationTray,
@@ -50,6 +68,10 @@ import {
 import { SimulationViewport, simulationFocusId } from "./SimulationViewport";
 import { Topbar, type EditorMode } from "./Topbar";
 import { screenNodeTypes } from "./components/FlowNodes";
+import { StickyNoteNode } from "./components/StickyNoteNode";
+import { CanvasContextMenu } from "./components/CanvasContextMenu";
+import { canvasMenuPosition, stickyNoteScreenPosition } from "./note-placement";
+import { withExplorationStatus } from "./exploration-edges";
 import {
   pathloomEdgeTypes,
   type PathloomEdge,
@@ -57,6 +79,7 @@ import {
 } from "./components/EditableEdge";
 import styles from "./editor.module.css";
 import cursorStyles from "./cursors.module.css";
+import notePanelStyles from "./note-inspector.module.css";
 import {
   applyNodePositions,
   buildEditorEdges,
@@ -64,11 +87,13 @@ import {
   interactionNodeId,
   moveEditorNodeWithDependents,
   preserveNodePositions,
+  stickyNoteNodeId,
   unresolvedNodeId,
   variantForState,
 } from "./graph";
 
 const HISTORY_LIMIT = 50;
+const editorNodeTypes = { ...screenNodeTypes, stickyNote: StickyNoteNode };
 
 const OUTCOME_TARGET_KINDS: Partial<Record<OutcomeKind, CoreUIStateKind>> = {
   success: "success",
@@ -190,8 +215,9 @@ interface PathloomEditorProps {
 }
 
 export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, extraActions }: PathloomEditorProps) {
-  const [project, setProject] = useState<ProjectDocument>(initialProject);
+  const [project, setProject] = useState<ProjectDocument>(() => reconcileExploration(initialProject));
   const analysis = useMemo(() => analyzeProject(project), [project]);
+  const exploration = useMemo(() => getExplorationSummary(project, analysis), [project, analysis]);
   const [initialNodes] = useState(() => buildEditorNodes(initialProject, analyzeProject(initialProject)));
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -204,18 +230,40 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
   const [previewStateIds, setPreviewStateIds] = useState<Record<string, string>>({});
   const [past, setPast] = useState<EditorSnapshot[]>([]);
   const [future, setFuture] = useState<EditorSnapshot[]>([]);
-  const [simulation, setSimulation] = useState<SimulationState>(() =>
+  const [simulation, setSimulationState] = useState<SimulationState>(() =>
     initialSimulation(initialProject),
   );
-  const [simulationPast, setSimulationPast] = useState<SimulationState[]>([]);
+  const [simulationPast, setSimulationPastState] = useState<SimulationState[]>([]);
+  const [recommendedCheckKey, setRecommendedCheckKey] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [canvasMenu, setCanvasMenu] = useState<{
+    position: CanvasPosition;
+    notePosition: CanvasPosition;
+  } | null>(null);
 
   const projectRef = useRef(project);
   const nodesRef = useRef(nodes);
   const modeRef = useRef(mode);
+  const simulationRef = useRef(simulation);
+  const simulationPastRef = useRef(simulationPast);
   const flowRef = useRef<ReactFlowInstance<Node, PathloomEdge> | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
+  const noteResizeSnapshotRef = useRef<EditorSnapshot | null>(null);
+  const editingNoteRef = useRef<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+
+  // Update the cursor synchronously so repeated input cannot traverse a stale step.
+  const setSimulation = useCallback((next: SimulationState | ((current: SimulationState) => SimulationState)) => {
+    const resolved = typeof next === "function" ? next(simulationRef.current) : next;
+    simulationRef.current = resolved;
+    setSimulationState(resolved);
+  }, []);
+  const setSimulationPast = useCallback((next: SimulationState[] | ((current: SimulationState[]) => SimulationState[])) => {
+    const resolved = typeof next === "function" ? next(simulationPastRef.current) : next;
+    simulationPastRef.current = resolved;
+    setSimulationPastState(resolved);
+  }, []);
 
   const persist = useCallback((document: ProjectDocument) => {
     try {
@@ -267,10 +315,12 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
 
   const restoreSnapshot = useCallback(
     (snapshot: EditorSnapshot) => {
-      projectRef.current = snapshot.project;
+      editingNoteRef.current = null;
+      const restored = reconcileExploration(snapshot.project, projectRef.current.exploration?.visits);
+      projectRef.current = restored;
       nodesRef.current = cloneNodes(snapshot.nodes);
-      setProject(snapshot.project);
-      persist(snapshot.project);
+      setProject(restored);
+      persist(restored);
       setNodes(cloneNodes(snapshot.nodes));
       setSelectedId(snapshot.selectedId);
       setSelectedEdgeId(null);
@@ -281,23 +331,27 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
   const commitProject = useCallback(
     (nextProject: ProjectDocument, message?: string, resetPositions = false) => {
       if (!requireDesignMode()) return false;
+      editingNoteRef.current = null;
       const before = {
         project: projectRef.current,
         nodes: cloneNodes(nodesRef.current),
         selectedId,
       };
       pushPast(before);
-      const nextAnalysis = analyzeProject(nextProject);
+      const reconciled = reconcileExploration(nextProject);
+      const resetChecks = Math.max(0, (nextProject.exploration?.visits.length ?? 0) - (reconciled.exploration?.visits.length ?? 0));
+      const nextAnalysis = analyzeProject(reconciled);
       const nextNodes = resetPositions
-        ? buildEditorNodes(nextProject, nextAnalysis)
-        : preserveNodePositions(buildEditorNodes(nextProject, nextAnalysis), nodesRef.current);
-      const positionedProject = applyNodePositions(nextProject, nextNodes);
+        ? buildEditorNodes(reconciled, nextAnalysis)
+        : preserveNodePositions(buildEditorNodes(reconciled, nextAnalysis), nodesRef.current);
+      const positionedProject = applyNodePositions(reconciled, nextNodes);
       projectRef.current = positionedProject;
       nodesRef.current = nextNodes;
       setProject(positionedProject);
       setNodes(nextNodes);
       persist(positionedProject);
-      if (message) showToast(message);
+      if (resetChecks > 0) showToast(`${message ?? "Flow updated"} · ${resetChecks} outcome ${resetChecks === 1 ? "check needs" : "checks need"} another look`);
+      else if (message) showToast(message);
       return true;
     },
     [persist, pushPast, requireDesignMode, selectedId, setNodes, showToast],
@@ -451,10 +505,129 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     [commitProject, requireDesignMode],
   );
 
+  const closeCanvasMenu = useCallback(() => setCanvasMenu(null), []);
+
+  const openCanvasMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
+    if (modeRef.current !== "design") return;
+    event.preventDefault();
+    const flow = flowRef.current;
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!flow || !bounds) return;
+    const clicked = { x: event.clientX, y: event.clientY };
+    setCanvasMenu({
+      position: canvasMenuPosition(bounds, clicked),
+      notePosition: flow.screenToFlowPosition(
+        stickyNoteScreenPosition(bounds, flow.getZoom(), clicked),
+        { snapToGrid: false },
+      ),
+    });
+  }, []);
+
+  const addStickyNote = useCallback((position?: CanvasPosition) => {
+    if (!requireDesignMode()) return;
+    closeCanvasMenu();
+    const current = projectRef.current;
+    if ((current.stickyNotes?.length ?? 0) >= STICKY_NOTE_LIMIT) {
+      showToast(`This flow supports up to ${STICKY_NOTE_LIMIT} sticky notes`);
+      return;
+    }
+    const flow = flowRef.current;
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    // Stay in the visible canvas: never auto-layout a note offscreen or refit
+    // the viewport after insertion. Right-click already captured its flow point.
+    const preferred = position ?? (flow && bounds
+      ? flow.screenToFlowPosition(stickyNoteScreenPosition(bounds, flow.getZoom()), { snapToGrid: false })
+      : null);
+    if (!preferred) return;
+    const note: StickyNote = {
+      id: entityId("sticky"),
+      text: "",
+      position: preferred,
+      size: { width: STICKY_NOTE_DEFAULT_WIDTH, height: STICKY_NOTE_DEFAULT_HEIGHT },
+    };
+    commitProject({ ...current, stickyNotes: [...(current.stickyNotes ?? []), note] }, "Sticky note added — click inside to write");
+    setSelectedId(stickyNoteNodeId(note.id));
+    setSelectedEdgeId(null);
+    setFocusedOutcomeId(null);
+    setCoverageOpen(false);
+  }, [closeCanvasMenu, commitProject, requireDesignMode, showToast]);
+
+  const updateStickyNoteText = useCallback((id: string, text: string) => {
+    if (!requireDesignMode()) return;
+    const current = projectRef.current;
+    const note = current.stickyNotes?.find((item) => item.id === id);
+    const nextText = text.slice(0, STICKY_NOTE_MAX_TEXT_LENGTH);
+    if (!note || note.text === nextText) return;
+    // Persist every change, but keep one Undo step per focused editing session.
+    if (editingNoteRef.current !== id) {
+      pushPast({ project: current, nodes: cloneNodes(nodesRef.current), selectedId: stickyNoteNodeId(id) });
+      editingNoteRef.current = id;
+    }
+    const nextProject = { ...current, stickyNotes: current.stickyNotes?.map((item) => item.id === id ? { ...item, text: nextText } : item) };
+    const nextNodes = nodesRef.current.map((node) => node.id === stickyNoteNodeId(id)
+      ? { ...node, data: { ...node.data, text: nextText } } : node);
+    projectRef.current = nextProject;
+    nodesRef.current = nextNodes;
+    setProject(nextProject);
+    setNodes(nextNodes);
+    persist(nextProject);
+  }, [persist, pushPast, requireDesignMode, setNodes]);
+
+  const endStickyNoteEdit = useCallback(() => {
+    editingNoteRef.current = null;
+  }, []);
+
+  const startStickyNoteResize = useCallback(() => {
+    if (modeRef.current !== "design") return;
+    editingNoteRef.current = null;
+    noteResizeSnapshotRef.current = { project: projectRef.current, nodes: cloneNodes(nodesRef.current), selectedId };
+  }, [selectedId]);
+
+  const finishStickyNoteResize = useCallback((id: string, geometry: { x: number; y: number; width: number; height: number }) => {
+    const before = noteResizeSnapshotRef.current;
+    noteResizeSnapshotRef.current = null;
+    if (!before || modeRef.current !== "design" || !Object.values(geometry).every(Number.isFinite)) return;
+    const current = projectRef.current;
+    const note = current.stickyNotes?.find((item) => item.id === id);
+    if (!note) return;
+    const position = { x: Math.round(geometry.x), y: Math.round(geometry.y) };
+    const size = {
+      width: Math.min(STICKY_NOTE_MAX_WIDTH, Math.max(STICKY_NOTE_MIN_WIDTH, Math.round(geometry.width))),
+      height: Math.min(STICKY_NOTE_MAX_HEIGHT, Math.max(STICKY_NOTE_MIN_HEIGHT, Math.round(geometry.height))),
+    };
+    if (note.position.x === position.x && note.position.y === position.y && note.size.width === size.width && note.size.height === size.height) return;
+    const nextProject = { ...current, stickyNotes: current.stickyNotes?.map((item) => item.id === id ? { ...item, position, size } : item) };
+    const nextNodes = buildEditorNodes(nextProject, analyzeProject(nextProject));
+    pushPast(before);
+    projectRef.current = nextProject;
+    nodesRef.current = nextNodes;
+    setProject(nextProject);
+    setNodes(nextNodes);
+    persist(nextProject);
+  }, [persist, pushPast, setNodes]);
+
+  const deleteStickyNote = useCallback((id: string) => {
+    const current = projectRef.current;
+    if (!current.stickyNotes?.some((note) => note.id === id)) return;
+    if (commitProject({ ...current, stickyNotes: current.stickyNotes.filter((note) => note.id !== id) }, "Sticky note removed — Undo restores it")) {
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+    }
+  }, [commitProject]);
+
   const deleteSelection = useCallback(() => {
     if (!requireDesignMode()) return;
     if (!selectedId) return;
     const currentProject = projectRef.current;
+
+    if (selectedId.startsWith("note:")) {
+      commitProject({
+        ...currentProject,
+        stickyNotes: currentProject.stickyNotes?.filter((note) => stickyNoteNodeId(note.id) !== selectedId),
+      }, "Sticky note removed — Undo restores it");
+      setSelectedId(null);
+      return;
+    }
 
     if (selectedId === currentProject.entryNodeId) {
       showToast("Choose another screen as the flow start before deleting this one");
@@ -1300,6 +1473,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     setSelectedEdgeId(null);
     setCoverageOpen(false);
     setSimulation(next);
+    setRecommendedCheckKey(null);
+    closeCanvasMenu();
     setSimulationPast([]);
     syncPreviewToCursor(next.cursor);
 
@@ -1307,47 +1482,83 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       (node) => node.id === projectRef.current.entryNodeId,
     );
     setSelectedId(entryExists ? projectRef.current.entryNodeId : null);
-  }, [syncPreviewToCursor]);
+  }, [closeCanvasMenu, setSimulation, setSimulationPast, syncPreviewToCursor]);
+
+  const exploreNextOutcome = useCallback(() => {
+    const summary = getExplorationSummary(projectRef.current);
+    const check = getNextUnexploredCheck(summary);
+    if (!check || !check.sourceStateId) {
+      showToast(summary.needsFix + summary.unreachable > 0
+        ? "Remaining outcome checks need attention before they can be explored"
+        : summary.total > 0 ? "All modeled outcome checks have been explored — this is not approval" : "Add an action and outcomes to begin");
+      return;
+    }
+    modeRef.current = "simulate";
+    setMode("simulate");
+    closeCanvasMenu();
+    setCoverageOpen(false);
+    setSelectedEdgeId(null);
+    setFocusedOutcomeId(null);
+    setRecommendedCheckKey(check.key);
+    const next: SimulationState = {
+      cursor: { type: "interaction", id: check.interactionId, nodeId: check.sourceNodeId, stateId: check.sourceStateId },
+      journey: [`Review shortcut: ${check.sourceName} · ${check.sourceStateName}`, check.interactionName],
+      traversedEdgeIds: [],
+      visitedNodeIds: [check.sourceNodeId, interactionNodeId(check.interactionId)],
+    };
+    setSimulation(next);
+    setSimulationPast([]);
+    syncPreviewToCursor(next.cursor);
+    setSelectedId(interactionNodeId(check.interactionId));
+  }, [closeCanvasMenu, setSimulation, setSimulationPast, showToast, syncPreviewToCursor]);
 
   const stopSimulation = useCallback(() => {
     modeRef.current = "design";
     setMode("design");
     setSelectedEdgeId(null);
     setSimulationPast([]);
-    if (simulation.cursor.type === "blocked" && simulation.cursor.outcomeId) {
-      const outcomeId = simulation.cursor.outcomeId;
+    setRecommendedCheckKey(null);
+    const cursor = simulationRef.current.cursor;
+    if (cursor.type === "blocked" && cursor.outcomeId) {
+      const outcomeId = cursor.outcomeId;
       const owner = projectRef.current.interactions.find((action) => action.outcomes.some((outcome) => outcome.id === outcomeId));
       if (owner) {
         setSelectedId(interactionNodeId(owner.id));
         setFocusedOutcomeId(outcomeId);
       }
     }
-    showToast("Simulation ended — the document was not changed");
-  }, [showToast, simulation.cursor]);
+    showToast("Back to editing — exploration progress is kept with this project");
+  }, [setSimulationPast, showToast]);
+
+  const showFlowIssues = useCallback(() => {
+    if (modeRef.current === "simulate") stopSimulation();
+    setCoverageOpen(true);
+  }, [stopSimulation]);
 
   const chooseInteraction = useCallback(
     (interactionId: string) => {
-      if (simulation.cursor.type !== "node") return;
+      const active = simulationRef.current;
+      if (modeRef.current !== "simulate" || active.cursor.type !== "node") return;
       const sourceNode = projectRef.current.nodes.find(
-        (node) => node.id === simulation.cursor.nodeId,
+        (node) => node.id === active.cursor.nodeId,
       );
       const interaction = projectRef.current.interactions.find(
         (item) =>
           item.id === interactionId &&
-          item.sourceNodeId === simulation.cursor.nodeId &&
+          item.sourceNodeId === active.cursor.nodeId &&
           (item.sourceStateId === null ||
-            item.sourceStateId === simulation.cursor.stateId),
+            item.sourceStateId === active.cursor.stateId),
       );
       if (!sourceNode || sourceNode.kind === "terminal" || !interaction) return;
 
-      setSimulationPast((items) => [...items, simulation]);
+      setSimulationPast((items) => [...items, active]);
       setSimulation((current) => ({
         ...current,
         cursor: {
           type: "interaction",
           id: interactionId,
-          nodeId: simulation.cursor.nodeId,
-          stateId: simulation.cursor.stateId,
+          nodeId: active.cursor.nodeId,
+          stateId: active.cursor.stateId,
         },
         journey: [...current.journey, interaction.name],
         traversedEdgeIds: [
@@ -1361,14 +1572,16 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         setSelectedId(actionId);
       }
     },
-    [simulation],
+    [setSimulation, setSimulationPast],
   );
 
   const chooseOutcome = useCallback(
     (interactionId: string, outcomeId: string) => {
+      const active = simulationRef.current;
       if (
-        simulation.cursor.type !== "interaction" ||
-        simulation.cursor.id !== interactionId
+        modeRef.current !== "simulate" ||
+        active.cursor.type !== "interaction" ||
+        active.cursor.id !== interactionId
       ) {
         return;
       }
@@ -1377,7 +1590,12 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       );
       const outcome = interaction?.outcomes.find((item) => item.id === outcomeId);
       if (!interaction || !outcome) return;
-      setSimulationPast((items) => [...items, simulation]);
+      const source = projectRef.current.nodes.find((node) => node.id === active.cursor.nodeId);
+      if (!source || source.kind === "terminal" || interaction.sourceNodeId !== source.id ||
+        !source.states.some((state) => state.id === active.cursor.stateId) ||
+        (interaction.sourceStateId !== null && interaction.sourceStateId !== active.cursor.stateId)) return;
+      setSimulationPast((items) => [...items, active]);
+      setRecommendedCheckKey(null);
 
       if (!outcome.target) {
         setSimulation((current) => ({
@@ -1388,8 +1606,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
             label: outcome.name,
             detail:
               "This outcome has no target. Connect it in Design mode to continue.",
-            nodeId: simulation.cursor.nodeId,
-            stateId: simulation.cursor.stateId,
+            nodeId: active.cursor.nodeId,
+            stateId: active.cursor.stateId,
             outcomeId: outcome.id,
           },
           journey: [...current.journey, `[${outcome.name}]`, "Blocked"],
@@ -1410,8 +1628,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
             reason: "broken",
             label: outcome.name,
             detail: `The target screen ${outcome.target!.nodeId} no longer exists. Repair this branch in Design mode.`,
-            nodeId: simulation.cursor.nodeId,
-            stateId: simulation.cursor.stateId,
+            nodeId: active.cursor.nodeId,
+            stateId: active.cursor.stateId,
             outcomeId: outcome.id,
           },
           journey: [...current.journey, `[${outcome.name}]`, "Broken"],
@@ -1433,8 +1651,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
             reason: "broken",
             label: outcome.name,
             detail: `The target state ${outcome.target!.stateId} no longer exists on ${destination.name}. Repair this branch in Design mode.`,
-            nodeId: simulation.cursor.nodeId,
-            stateId: simulation.cursor.stateId,
+            nodeId: active.cursor.nodeId,
+            stateId: active.cursor.stateId,
             outcomeId: outcome.id,
           },
           journey: [...current.journey, `[${outcome.name}]`, "Broken"],
@@ -1450,8 +1668,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
             reason: "broken",
             label: outcome.name,
             detail: `${destination.name} does not have a valid initial state. Repair the target screen in Design mode.`,
-            nodeId: simulation.cursor.nodeId,
-            stateId: simulation.cursor.stateId,
+            nodeId: active.cursor.nodeId,
+            stateId: active.cursor.stateId,
             outcomeId: outcome.id,
           },
           journey: [...current.journey, `[${outcome.name}]`, "Broken"],
@@ -1465,6 +1683,14 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         nodeId: destination.id,
         stateId: destinationStateId,
       };
+      // Exploration is metadata, not an authored graph edit or an Undo step.
+      // A failed/unresolved traversal never reaches this recording boundary.
+      const progressed = recordExploredOutcome(projectRef.current, interactionId, outcomeId, active.cursor.stateId);
+      if (progressed !== projectRef.current) {
+        projectRef.current = progressed;
+        setProject(progressed);
+        persist(progressed);
+      }
       syncPreviewToCursor(nextCursor);
       setSimulation((current) => ({
         ...current,
@@ -1479,18 +1705,20 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       }));
       setSelectedId(destination.id);
     },
-    [simulation, syncPreviewToCursor],
+    [persist, setSimulation, setSimulationPast, syncPreviewToCursor],
   );
 
   const backSimulation = useCallback(() => {
-    const previous = simulationPast.at(-1);
+    if (modeRef.current !== "simulate") return;
+    const previous = simulationPastRef.current.at(-1);
     if (!previous) return;
     setSimulation(previous);
+    setRecommendedCheckKey(null);
     setSimulationPast((items) => items.slice(0, -1));
     syncPreviewToCursor(previous.cursor);
     const focusId = simulationFocusId(previous.cursor);
     setSelectedId(focusId);
-  }, [simulationPast, syncPreviewToCursor]);
+  }, [setSimulation, setSimulationPast, syncPreviewToCursor]);
 
   const previewState = useMemo<UIState | null>(() => {
     const selectedNode = project.nodes.find((node) => node.id === selectedId);
@@ -1513,6 +1741,22 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     const visited = new Set(simulation.visitedNodeIds);
 
     return nodes.map((node) => {
+      if (node.type === "stickyNote") {
+        return {
+          ...node,
+          hidden: mode === "simulate",
+          selected: mode === "design" && node.id === selectedId,
+          data: {
+            ...node.data,
+            readOnly: mode !== "design",
+            onTextChange: updateStickyNoteText,
+            onTextEditEnd: endStickyNoteEdit,
+            onResizeStart: startStickyNoteResize,
+            onResizeEnd: finishStickyNoteResize,
+            onDelete: deleteStickyNote,
+          },
+        };
+      }
       const data = { ...node.data } as Record<string, unknown>;
       if (node.type === "screen") {
         const projectNode = project.nodes.find((item) => item.id === node.id);
@@ -1541,10 +1785,12 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         selected: node.id === (mode === "simulate" ? activeId : selectedId),
       };
     });
-  }, [mode, nodes, previewStateIds, project.nodes, selectedId, simulation]);
+  }, [deleteStickyNote, endStickyNoteEdit, finishStickyNoteResize, mode, nodes, previewStateIds, project.nodes, selectedId, simulation, startStickyNoteResize, updateStickyNoteText]);
 
   const displayEdges = useMemo<PathloomEdge[]>(() => {
-    const edges = buildEditorEdges(project).map((edge): PathloomEdge => ({
+    const context = mode === "simulate" && simulation.cursor.type === "interaction"
+      ? { interactionId: simulation.cursor.id, stateId: simulation.cursor.stateId } : undefined;
+    const edges = withExplorationStatus(buildEditorEdges(project), exploration, context).map((edge): PathloomEdge => ({
       ...edge,
       selected: mode === "design" && edge.id === selectedEdgeId,
       data: {
@@ -1563,19 +1809,20 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         hidden: edge.hidden ? !active : false,
         style: {
           ...edge.style,
-          opacity: active ? 1 : 0.2,
+          opacity: active ? 1 : edge.data?.explorationPending ? 0.65 : 0.3,
           strokeWidth: active ? 2.8 : 1.4,
         },
         labelStyle: {
           ...edge.labelStyle,
-          opacity: active ? 1 : 0.28,
+          opacity: active ? 1 : edge.data?.explorationPending ? 0.85 : 0.4,
         },
       };
     });
-  }, [commitEdgeRoute, mode, project, selectedEdgeId, simulation.traversedEdgeIds]);
+  }, [commitEdgeRoute, exploration, mode, project, selectedEdgeId, simulation.cursor, simulation.traversedEdgeIds]);
 
   const handleNodeDragStart = useCallback(() => {
     if (modeRef.current !== "design") return;
+    editingNoteRef.current = null;
     dragSnapshotRef.current = {
       project: projectRef.current,
       nodes: cloneNodes(nodesRef.current),
@@ -1593,6 +1840,9 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         (!projectRef.current.nodes.some((node) => node.id === draggedNode.id) &&
           !projectRef.current.interactions.some(
             (interaction) => interactionNodeId(interaction.id) === draggedNode.id,
+          ) &&
+          !projectRef.current.stickyNotes?.some(
+            (note) => stickyNoteNodeId(note.id) === draggedNode.id,
           ))
       ) {
         return;
@@ -1629,6 +1879,34 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
 
   const handleNodesChange = useCallback<OnNodesChange<Node>>(
     (changes) => {
+      // React Flow's keyboard movement has no drag-start/stop callbacks.
+      // Persist note nudges separately from pointer drags and resize gestures.
+      if (modeRef.current === "design" && !dragSnapshotRef.current && !noteResizeSnapshotRef.current) {
+        const current = projectRef.current;
+        const positions = new Map<string, { x: number; y: number }>();
+        for (const change of changes) {
+          if (change.type !== "position" || change.dragging !== false || !change.position) continue;
+          const note = current.stickyNotes?.find((item) => stickyNoteNodeId(item.id) === change.id);
+          if (note && (note.position.x !== change.position.x || note.position.y !== change.position.y)) {
+            positions.set(note.id, change.position);
+          }
+        }
+        if (positions.size > 0) {
+          editingNoteRef.current = null;
+          pushPast({ project: current, nodes: cloneNodes(nodesRef.current), selectedId });
+          const nextProject = {
+            ...current,
+            stickyNotes: current.stickyNotes?.map((note) => ({ ...note, position: positions.get(note.id) ?? note.position })),
+          };
+          const nextNodes = applyNodeChanges(changes, nodesRef.current);
+          projectRef.current = nextProject;
+          nodesRef.current = nextNodes;
+          setProject(nextProject);
+          setNodes(nextNodes);
+          persist(nextProject);
+          return;
+        }
+      }
       // React Flow still needs measurements while previewing, but selection
       // and movement belong to the editor; the simulation owns its cursor.
       onNodesChange(modeRef.current === "design"
@@ -1647,7 +1925,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       // while newly created nodes are measured; that must not close the editor.
       // Intentional deselection is handled by onPaneClick instead.
     },
-    [onNodesChange],
+    [onNodesChange, persist, pushPast, selectedId, setNodes],
   );
 
   const handleEdgesChange = useCallback<OnEdgesChange<PathloomEdge>>(
@@ -1673,6 +1951,10 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       }
     },
     [selectEdge, selectedEdgeId],
+  );
+
+  const selectedStickyNote = project.stickyNotes?.find(
+    (note) => stickyNoteNodeId(note.id) === selectedId,
   );
 
   return (
@@ -1709,6 +1991,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         analysis={analysis}
         onAddInteraction={() => addInteraction()}
         onAddScreen={() => addScreen()}
+        onAddStickyNote={() => addStickyNote()}
         onLoadExample={loadExample}
         onSelect={selectAndCenter}
         project={project}
@@ -1719,7 +2002,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         aria-label="Flow canvas"
         className={`${styles.canvas} ${cursorStyles.canvasCursor} ${coverageOpen ? styles.coverageCanvas : ""}`}
       >
-        <div
+        {(coverageOpen || mode === "simulate") && <div
           className={`${styles.canvasModeLabel} ${coverageOpen ? styles.coverageModeLabel : ""}`}
         >
           {coverageOpen ? (
@@ -1735,9 +2018,18 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
               <GitBranch aria-hidden="true" size={11} /> Your flow
             </>
           )}
-        </div>
+        </div>}
 
-        <div className={styles.graphSurface}>
+        {mode === "design" && !coverageOpen && (
+          <ExplorationPanel
+            issueCount={analysis.issues.length}
+            onCheckFlow={showFlowIssues}
+            onExploreNext={exploreNextOutcome}
+            summary={exploration}
+          />
+        )}
+
+        <div className={styles.graphSurface} ref={canvasRef}>
         <ReactFlow
           colorMode="light"
           deleteKeyCode={null}
@@ -1754,7 +2046,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
           maxZoom={1.8}
           minZoom={0.25}
           multiSelectionKeyCode="Shift"
-          nodeTypes={screenNodeTypes}
+          nodeTypes={editorNodeTypes}
           nodes={displayNodes}
           nodesConnectable={mode === "design"}
           nodesDraggable={mode === "design"}
@@ -1778,6 +2070,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
           onNodeDragStart={handleNodeDragStart}
           onNodeDragStop={handleNodeDragStop}
           onNodesChange={handleNodesChange}
+          onPaneContextMenu={openCanvasMenu}
+          onMoveStart={closeCanvasMenu}
           onPaneClick={(event) => {
             if (mode !== "design") return;
             if (event.detail === 2 && mode === "design") {
@@ -1808,8 +2102,22 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         </ReactFlow>
         </div>
 
+        {mode === "design" && canvasMenu && (
+          <CanvasContextMenu
+            key={`${canvasMenu.position.x}:${canvasMenu.position.y}`}
+            onAddStickyNote={() => addStickyNote(canvasMenu.notePosition)}
+            onClose={closeCanvasMenu}
+            position={canvasMenu.position}
+          />
+        )}
+
         {mode === "simulate" && (
           <SimulationTray
+            flowIssueCount={analysis.issues.length}
+            exploration={exploration}
+            recommendedCheckKey={recommendedCheckKey}
+            onExploreNext={exploreNextOutcome}
+            onCheckFlow={showFlowIssues}
             canGoBack={simulationPast.length > 0}
             cursor={simulation.cursor}
             journey={simulation.journey}
@@ -1826,6 +2134,8 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
           <div className={styles.canvasHint}>
             {selectedEdgeId
               ? "Drag the purple dot to reroute · Double-click it to reset"
+              : selectedStickyNote
+                ? "Type inside the note · Drag its header to move · Drag the corner to resize"
               : "Select a screen to edit it · Drag the canvas to pan"}
           </div>
         )}
@@ -1837,7 +2147,34 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         )}
       </section>
 
-      {mode === "design" && <Inspector
+      {mode === "design" && selectedStickyNote && !coverageOpen && (
+        <aside aria-label="Sticky note editor" className={styles.rightPanel}>
+          <div className={notePanelStyles.header}>
+            <StickyNoteIcon aria-hidden="true" size={16} />
+            <h2>Sticky note</h2>
+          </div>
+          <div className={notePanelStyles.body}>
+            <p>Type directly on the note. Use it for ideas, questions, or context alongside your flow.</p>
+            <dl>
+              <dt>Move</dt>
+              <dd>Drag the note’s header.</dd>
+              <dt>Resize</dt>
+              <dd>Drag the bottom-right corner, or focus it and use the arrow keys.</dd>
+            </dl>
+            <p className={notePanelStyles.size}>{selectedStickyNote.size.width} × {selectedStickyNote.size.height} px</p>
+            <p>Notes are saved with your project and stay out of flow checks and previews.</p>
+            <button
+              className={notePanelStyles.deleteButton}
+              onClick={() => deleteStickyNote(selectedStickyNote.id)}
+              type="button"
+            >
+              Remove note
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {mode === "design" && (!selectedStickyNote || coverageOpen) && <Inspector
         analysis={analysis}
         coverageOpen={coverageOpen}
         initialOutcomeId={focusedOutcomeId}

@@ -1,0 +1,60 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  border-bottom: 1px solid var(--ui-border);
+  color: var(--ui-text);
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  color: var(--ui-text);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.body p,
+.body dl,
+.body dd {
+  margin: 0;
+}
+
+.body dt {
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+.body dd,
+.size {
+  color: var(--ui-muted);
+}
+
+.deleteButton {
+  align-self: flex-start;
+  padding: 7px 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  background: transparent;
+  color: #ffb4a9;
+  font: inherit;
+  cursor: pointer;
+}
+
+.deleteButton:hover {
+  background: #ffb4a914;
+}
+
+.deleteButton:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}

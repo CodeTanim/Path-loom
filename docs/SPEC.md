@@ -436,6 +436,40 @@ The vertical slice is ready to call an MVP only when all are true:
 
 ## 10. Later roadmap
 
+### Guided exploration increment — 2026-09-09
+
+Scope: connect Preview with saved exploration progress, while keeping structural flow findings separate from review activity. No manual approval, branch comments, QA export, AI, or screen composer in this increment.
+
+- Track successful outcome traversal in its reachable source screen/state context. An all-states action can have multiple outcome checks. Keep unresolved/broken destinations and actions unreachable from the start visible as remaining checks; do not mark them explored merely for attempting them.
+- Show persistent explored/total outcome checks, an outcome checklist, and clear unexplored highlights. “Explored” means followed in Preview, not approved or proven correct; the denominator only describes modeled checks, not every possible journey.
+- **Explore next outcome** jumps to a reachable source state and opens its action, ready for an explicit outcome choice. Label this review shortcut; do not count the shortcut or its setup route as traversal.
+- Normal Preview still starts at the flow start. Back, Restart, leaving Preview, and reloading do not clear valid exploration progress.
+- Store optional, versioned exploration records with the project. Compare stable semantic fingerprints and prune affected records on edits; layout, arrow routing, sticky notes, and ordering do not invalidate them. Start changes invalidate the review context.
+- Undo/Redo restore design snapshots without discarding subsequently learned, still-valid exploration. Semantic undo may restore matching earlier exploration.
+- Use separate structural issue and exploration counts. Finishing the exploration count does not imply a problem-free flow.
+
+Acceptance: explore multiple alternatives, restart/reopen, use a guided shortcut without inflating progress, repair a destination and re-explore only affected checks, and retain progress through layout edits. Existing guest projects must remain readable.
+
+Verification: 288 automated tests across 17 files, ESLint, TypeScript, and the webpack production build pass. Browser QA in an isolated guest project verified all three payment-example checks, normal Preview starting at Checkout, state-correct review shortcuts without counting setup, repeated outcomes without double counting, Back/Restart/reload retention, and Undo of a prior note edit preserving newly learned progress. Renaming a destination reset only its affected check; Undo/Redo restored the matching progress. Removing an outcome destination left it blocked and uncounted, invalidated the affected return path, and linked correctly to structural flow fixes. Restoring the edit recovered the prior checks. No browser console warnings or errors were observed. Guest and account-cache persistence paths have automated coverage; live account/cloud sync remains unverified without configured services.
+
+### Canvas annotation increment — 2026-09-09
+
+Scope: lightweight sticky notes alongside the existing state graph, not a screen composer.
+
+- Add yellow notes from the outline; edit multiline plain text directly on the canvas.
+- Right-click empty canvas space for **Add sticky note** at that spot. Sidebar insertion uses the visible canvas center at the current pan/zoom. Neither path recenters the canvas or uses automatic spacing that can move notes offscreen; edge placements are kept visible where possible.
+- Drag the header to reposition a note; drag the selected corner to resize it. Arrow keys on the corner offer keyboard resizing.
+- Persist note text, position, and dimensions in an optional `stickyNotes` document collection, keeping existing projects valid.
+- Support Undo/Redo for creation, text-edit sessions, movement, resizing, and deletion.
+- Keep notes out of state transitions, coverage, and journey previews; show them separately in the searchable outline.
+- Bound notes to 200 per project, 10,000 characters each, and sizes between 180 × 140 and 1600 × 1200 canvas pixels.
+
+Acceptance gate: add, type, move, resize, undo/redo, and reload without losing notes or changing the modeled flow.
+
+Verification: 186 automated tests, ESLint, TypeScript, and the webpack production build pass. Browser QA verified multiline typing saved before blur, pointer dragging/resizing, keyboard nudging/resizing, Undo/Redo for edits and geometry, deletion recovery, independent notes, outline search, and reload persistence. Notes disappear during Preview and return unchanged afterward; the flow-check count is unchanged. No browser console warnings or errors were observed. Live account/cloud sync still requires configured services as documented above.
+
+Placement follow-up: 203 tests, ESLint, TypeScript, and the webpack build pass. Browser QA verified right-click insertion at two different pan/zoom settings, sidebar insertion in the visible canvas, unchanged viewport transforms after creation, keyboard menu activation, Escape/outside-click dismissal, edge containment, Undo/Redo, and saved insertion positions after reload. Right-clicking note text retains the native text menu. No console warnings or errors were observed.
+
 After the MVP gate:
 
 1. Screen composer: text, shapes, resize, layers, and reusable components.

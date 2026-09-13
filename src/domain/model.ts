@@ -29,6 +29,23 @@ export interface CanvasSize {
   height: number;
 }
 
+export const STICKY_NOTE_MIN_WIDTH = 180;
+export const STICKY_NOTE_MIN_HEIGHT = 140;
+export const STICKY_NOTE_MAX_WIDTH = 1600;
+export const STICKY_NOTE_MAX_HEIGHT = 1200;
+export const STICKY_NOTE_DEFAULT_WIDTH = 240;
+export const STICKY_NOTE_DEFAULT_HEIGHT = 200;
+export const STICKY_NOTE_MAX_TEXT_LENGTH = 10_000;
+export const STICKY_NOTE_LIMIT = 200;
+
+/** A canvas annotation, never a flow step or an interaction destination. */
+export interface StickyNote {
+  id: string;
+  text: string;
+  position: CanvasPosition;
+  size: CanvasSize;
+}
+
 /** A renderer-independent hint for manually routing one graph connection. */
 export interface EdgeRoute {
   /** Offset from the connection's automatically calculated center point. */
@@ -106,6 +123,22 @@ export interface Interaction {
   incomingRoute?: EdgeRoute;
 }
 
+export const EXPLORATION_VISIT_LIMIT = 10_000;
+export const EXPLORATION_FINGERPRINT_MAX_LENGTH = 20_000;
+
+/** A completed branch in one source-state context, tied to its reviewed behavior. */
+export interface ExplorationVisit {
+  interactionId: string;
+  outcomeId: string;
+  sourceStateId: string;
+  fingerprint: string;
+}
+
+export interface ProjectExploration {
+  version: 1;
+  visits: ExplorationVisit[];
+}
+
 export interface ProjectDocument {
   schemaVersion: 1;
   id: string;
@@ -114,6 +147,10 @@ export interface ProjectDocument {
   entryNodeId: string;
   nodes: FlowNode[];
   interactions: Interaction[];
+  /** Optional so existing v1 projects continue to load without migration. */
+  stickyNotes?: StickyNote[];
+  /** Exploration is progress, not approval or a claim that the product was tested. */
+  exploration?: ProjectExploration;
 }
 
 /** Product-name alias for callers that prefer a more explicit document type. */

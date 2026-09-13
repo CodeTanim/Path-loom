@@ -1,14 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analyzeProject,
   checkoutProject,
   isPathloomDocument,
   parsePathloomDocument,
+  STICKY_NOTE_DEFAULT_HEIGHT,
+  STICKY_NOTE_DEFAULT_WIDTH,
+  STICKY_NOTE_LIMIT,
+  STICKY_NOTE_MAX_HEIGHT,
+  STICKY_NOTE_MAX_TEXT_LENGTH,
+  STICKY_NOTE_MAX_WIDTH,
+  STICKY_NOTE_MIN_HEIGHT,
+  STICKY_NOTE_MIN_WIDTH,
   type ProjectDocument,
+  type StickyNote,
 } from "../../src/domain";
 
 function cloneCheckoutProject(): ProjectDocument {
   return structuredClone(checkoutProject);
+}
+
+function createStickyNote(): StickyNote {
+  return {
+    id: "review-note",
+    text: "Review the declined-payment path.\nWho owns recovery?",
+    position: { x: -100, y: 240.5 },
+    size: { width: STICKY_NOTE_DEFAULT_WIDTH, height: STICKY_NOTE_DEFAULT_HEIGHT },
+  };
 }
 
 describe("Pathloom document validation", () => {
@@ -29,6 +48,90 @@ describe("Pathloom document validation", () => {
     };
 
     expect(parsePathloomDocument(JSON.stringify(document))).toEqual(document);
+  });
+
+  it("round-trips sticky notes while preserving legacy documents without notes", () => {
+    const legacy = cloneCheckoutProject();
+    delete legacy.stickyNotes;
+    expect(parsePathloomDocument(JSON.stringify(legacy))).toEqual(legacy);
+    expect(isPathloomDocument({ ...legacy, stickyNotes: [] })).toBe(true);
+
+    const document = { ...legacy, stickyNotes: [createStickyNote()] };
+    expect(parsePathloomDocument(JSON.stringify(document))).toEqual(document);
+  });
+
+  it("does not treat sticky notes as flow steps or change coverage analysis", () => {
+    const document = cloneCheckoutProject();
+    const withoutNotes = analyzeProject(document);
+    document.stickyNotes = [createStickyNote()];
+    expect(analyzeProject(document)).toEqual(withoutNotes);
+  });
+
+  it("accepts empty note text and inclusive size and text boundaries", () => {
+    const minimum = {
+      ...createStickyNote(),
+      text: "",
+      size: { width: STICKY_NOTE_MIN_WIDTH, height: STICKY_NOTE_MIN_HEIGHT },
+    };
+    const maximum = {
+      ...createStickyNote(),
+      id: "maximum-note",
+      text: "x".repeat(STICKY_NOTE_MAX_TEXT_LENGTH),
+      size: { width: STICKY_NOTE_MAX_WIDTH, height: STICKY_NOTE_MAX_HEIGHT },
+    };
+    expect(isPathloomDocument({ ...checkoutProject, stickyNotes: [minimum, maximum] })).toBe(true);
+  });
+
+  it.each([
+    ["empty ID", { id: " " }],
+    ["non-string text", { text: 42 }],
+    ["missing text", { text: undefined }],
+    ["oversized text", { text: "x".repeat(STICKY_NOTE_MAX_TEXT_LENGTH + 1) }],
+    ["missing position", { position: undefined }],
+    ["incomplete position", { position: { x: 0 } }],
+    ["non-finite position", { position: { x: Number.NaN, y: 0 } }],
+    ["infinite position", { position: { x: 0, y: Number.POSITIVE_INFINITY } }],
+    ["missing size", { size: undefined }],
+    ["incomplete size", { size: { width: 240 } }],
+    ["negative size", { size: { width: -240, height: 200 } }],
+    ["zero size", { size: { width: 240, height: 0 } }],
+    ["non-finite size", { size: { width: Number.NaN, height: 200 } }],
+    ["infinite size", { size: { width: 240, height: Number.POSITIVE_INFINITY } }],
+    ["small width", { size: { width: STICKY_NOTE_MIN_WIDTH - 1, height: 200 } }],
+    ["small height", { size: { width: 240, height: STICKY_NOTE_MIN_HEIGHT - 1 } }],
+    ["large width", { size: { width: STICKY_NOTE_MAX_WIDTH + 1, height: 200 } }],
+    ["large height", { size: { width: 240, height: STICKY_NOTE_MAX_HEIGHT + 1 } }],
+  ])("rejects sticky notes with %s", (_description, patch) => {
+    expect(isPathloomDocument({
+      ...checkoutProject,
+      stickyNotes: [{ ...createStickyNote(), ...patch }],
+    })).toBe(false);
+  });
+
+  it("rejects malformed note lists and duplicate note IDs", () => {
+    for (const stickyNotes of [null, {}, "notes", [null], [createStickyNote(), createStickyNote()]]) {
+      expect(isPathloomDocument({ ...checkoutProject, stickyNotes })).toBe(false);
+    }
+  });
+
+  it("limits note counts while accepting the exact supported maximum", () => {
+    const stickyNotes = Array.from({ length: STICKY_NOTE_LIMIT }, (_, index) => ({
+      ...createStickyNote(),
+      id: `note-${index}`,
+    }));
+    expect(isPathloomDocument({ ...checkoutProject, stickyNotes })).toBe(true);
+    expect(isPathloomDocument({
+      ...checkoutProject,
+      stickyNotes: [...stickyNotes, { ...createStickyNote(), id: "one-too-many" }],
+    })).toBe(false);
+  });
+
+  it("keeps raw note and screen IDs separate while rejecting projected collisions", () => {
+    const document = cloneCheckoutProject();
+    document.stickyNotes = [{ ...createStickyNote(), id: document.nodes[0].id }];
+    expect(isPathloomDocument(document)).toBe(true);
+    document.nodes[0].id = `note:${document.stickyNotes[0].id}`;
+    expect(isPathloomDocument(document)).toBe(false);
   });
 
   it("rejects malformed route hints", () => {

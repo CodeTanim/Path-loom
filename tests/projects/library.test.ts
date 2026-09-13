@@ -124,6 +124,51 @@ describe("guest project library", () => {
     expect(original.document.nodes[0].name).toBe("Checkout");
   });
 
+  it("saves note text, position, and size and independently duplicates annotations", () => {
+    const storage = memoryStorage();
+    const original = createProject("example");
+    original.document.stickyNotes = [{
+      id: "review-note",
+      text: "Check payment recovery.\nKeep this copy unchanged.",
+      position: { x: -120, y: 330 },
+      size: { width: 320, height: 260 },
+    }];
+    saveProject(storage, original);
+    const reopened = getProject(storage, original.id)!;
+    expect(reopened.document.stickyNotes).toEqual(original.document.stickyNotes);
+
+    const duplicate = duplicateProject(reopened);
+    expect(duplicate.document.stickyNotes).toEqual(reopened.document.stickyNotes);
+    duplicate.document.stickyNotes![0].text = "Copy-only edits";
+    duplicate.document.stickyNotes![0].position.x = 400;
+    duplicate.document.stickyNotes![0].size.width = 500;
+    saveProject(storage, duplicate);
+    expect(getProject(storage, original.id)?.document.stickyNotes).toEqual(original.document.stickyNotes);
+    expect(getProject(storage, duplicate.id)?.document.stickyNotes).toEqual(duplicate.document.stickyNotes);
+  });
+
+  it("marks annotation-only edits dirty and preserves them through account-cache saves", () => {
+    const storage = memoryStorage();
+    const original = { ...createProject("blank"), dirty: false, cloud: { ownerId: "alice", revision: 2 } };
+    const document = {
+      ...original.document,
+      stickyNotes: [{
+        id: "review-note",
+        text: "Ask about the empty state.",
+        position: { x: 80, y: -100 },
+        size: { width: 240, height: 200 },
+      }],
+    };
+    const edited = updateProject(original, document);
+    expect(edited.dirty).toBe(true);
+    expect(edited.cloud).toEqual(original.cloud);
+    const cloud = { id: edited.id, document: reorderObjectKeys(document), revision: 3, updatedAt: edited.updatedAt };
+    const acknowledged = mergeCloudProject(edited, cloud, "alice");
+    expect(acknowledged.dirty).toBe(false);
+    saveProject(storage, acknowledged, "alice");
+    expect(getProject(storage, edited.id, "alice")?.document.stickyNotes).toEqual(document.stickyNotes);
+  });
+
   it("marks a changed document dirty while preserving its cloud base revision", () => {
     const original = { ...createProject("blank"), cloud: { ownerId: "alice", revision: 4 }, dirty: false };
     expect(updateProject(original, structuredClone(original.document))).toBe(original);

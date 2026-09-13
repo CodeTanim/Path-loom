@@ -1,0 +1,56 @@
+.panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 5;
+  width: min(290px, calc(100% - 32px));
+  max-height: calc(100% - 96px);
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  color: var(--ui-text);
+  background: var(--ui-panel);
+  box-shadow: 0 2px 9px #0002;
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: #595959 transparent;
+}
+
+.header { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--ui-text); }
+.header h2 { margin: 0; font-size: 11px; font-weight: 600; }
+.header > svg { color: var(--ui-accent); }
+.progress { margin: 0; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
+.progress strong { color: var(--ui-text); font-size: 14px; font-weight: 600; }
+.progressBar { display: block; appearance: none; width: 100%; height: 3px; margin-top: 9px; overflow: hidden; border: 0; border-radius: 2px; background: var(--ui-field); color: var(--ui-accent); }
+.progressBar::-webkit-progress-bar { border-radius: 2px; background: var(--ui-field); }
+.progressBar::-webkit-progress-value { border-radius: 2px; background: var(--ui-accent); }
+.progressBar::-moz-progress-bar { border-radius: 2px; background: var(--ui-accent); }
+.caption, .scope { margin: 8px 0 0; color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+.counts { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 11px 0; color: var(--ui-muted); font-size: 10px; }
+.counts span { display: inline-flex; align-items: center; gap: 4px; }
+.warning { color: #f0c475; }
+.exploreButton, .issuesButton { display: flex; align-items: center; justify-content: space-between; gap: 7px; width: 100%; border-radius: 3px; font-size: 11px; font-weight: 550; cursor: pointer; }
+.exploreButton { min-height: 31px; padding: 6px 8px; border: 1px solid var(--ui-accent); color: var(--ui-accent); background: var(--ui-accent-soft); }
+.exploreButton:hover:not(:disabled) { background: #2b4e3f; }
+.exploreButton:disabled { border-color: var(--ui-border); color: var(--ui-muted); background: var(--ui-field); cursor: default; opacity: .6; }
+.issuesButton { justify-content: flex-start; min-height: 29px; margin-top: 6px; padding: 5px 0; border: 0; color: #f0c475; background: transparent; text-align: left; }
+.issuesButton > svg:last-child { margin-left: auto; }
+.issuesButton:hover { color: #ffe0a8; }
+.exploreButton:focus-visible, .issuesButton:focus-visible, .details summary:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
+.empty { margin: 0; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
+.details { margin: 12px -12px -12px; border-top: 1px solid var(--ui-border); }
+.details summary { display: flex; align-items: center; gap: 6px; padding: 10px 12px; color: var(--ui-text); font-size: 11px; font-weight: 550; cursor: pointer; list-style: none; }
+.details summary::-webkit-details-marker { display: none; }
+.details[open] summary > svg { transform: rotate(90deg); }
+.details summary:hover { background: var(--ui-field); }
+.scope { margin: 0; padding: 0 12px 10px; }
+.checklist { max-height: min(260px, 34vh); margin: 0; padding: 0; overflow: auto; list-style: none; }
+.check { padding: 10px 12px; border-top: 1px solid var(--ui-border); }
+.checkTitle { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.checkTitle strong { color: var(--ui-text); font-size: 11px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; }
+.status { display: inline-flex; align-items: center; gap: 5px; color: var(--ui-muted); font-size: 10px; }
+.status.warning { color: #f0c475; }
+.status.explored { color: var(--ui-accent); }
+.context { display: block; margin-top: 6px; color: var(--ui-muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.reason { margin: 4px 0 0; color: #f0c475; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }

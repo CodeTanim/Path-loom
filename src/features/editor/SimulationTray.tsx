@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert, Monitor, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, CircleAlert, Monitor, RotateCcw, X } from "lucide-react";
 
-import type { Outcome, ProjectDocument } from "@/domain";
+import type { ExplorationSummary, Outcome, ProjectDocument } from "@/domain";
 import { OUTCOME_COLORS } from "./graph";
 import styles from "./preview.module.css";
 
@@ -34,6 +34,11 @@ interface SimulationTrayProps {
   onBack: () => void;
   onRestart: () => void;
   onExit: () => void;
+  exploration?: ExplorationSummary;
+  onExploreNext?: () => void;
+  recommendedCheckKey?: string | null;
+  onCheckFlow?: () => void;
+  flowIssueCount?: number;
 }
 
 function destinationLabel(project: ProjectDocument, outcome: Outcome) {
@@ -56,6 +61,11 @@ export function SimulationTray({
   onBack,
   onRestart,
   onExit,
+  exploration,
+  onExploreNext,
+  recommendedCheckKey,
+  onCheckFlow,
+  flowIssueCount = 0,
 }: SimulationTrayProps) {
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
   const cursorNode = project.nodes.find((node) => node.id === cursor.nodeId);
@@ -64,6 +74,9 @@ export function SimulationTray({
     ? project.interactions.find((interaction) => interaction.id === cursor.id)
     : undefined;
   const currentState = cursorNode?.states.find((state) => state.id === cursor.stateId);
+  const currentChecks = new Map(exploration?.checks
+    .filter((check) => check.interactionId === currentInteraction?.id && check.sourceStateId === cursor.stateId)
+    .map((check) => [check.outcomeId, check]));
   const cursorIsBroken = cursor.type !== "blocked" && (
     !cursorNode ||
     !currentState ||
@@ -86,6 +99,7 @@ export function SimulationTray({
   );
   const isBlocked = cursor.type === "blocked" || cursorIsBroken;
   const isStopped = isComplete || isDeadEnd || isBlocked;
+  const isReviewShortcut = journey[0]?.startsWith("Review shortcut:") ?? false;
   const description = currentState?.description || cursorNode?.description;
   const statusLabel = isBlocked ? "This path needs a fix" : isComplete ? "Flow complete" : isDeadEnd ? "No next step yet" : currentInteraction ? `Action on ${cursorNode?.name}` : "Current screen";
   const title = cursor.type === "blocked"
@@ -138,6 +152,31 @@ export function SimulationTray({
         </div>
       </header>
 
+      {exploration && (
+        <div className={styles.explorationRow}>
+          <div className={styles.explorationProgress}>
+            <span aria-live="polite" aria-atomic="true"><strong>{exploration.explored} of {exploration.total}</strong> outcome checks explored</span>
+            <small>Followed in Preview, not approved.</small>
+          </div>
+          <div className={styles.explorationActions}>
+            {exploration.needsFix + exploration.unreachable > 0 && (
+              <span className={styles.blockedCount}>{exploration.needsFix + exploration.unreachable} check{exploration.needsFix + exploration.unreachable === 1 ? "" : "s"} blocked</span>
+            )}
+            {flowIssueCount > 0 && onCheckFlow && (
+              <button className={styles.flowIssuesButton} onClick={onCheckFlow} type="button">
+                <CircleAlert aria-hidden="true" size={12} />
+                View flow issues ({flowIssueCount})
+              </button>
+            )}
+            {onExploreNext && (
+              <button className={styles.nextOutcomeButton} disabled={exploration.unexplored === 0} onClick={onExploreNext} type="button">
+                Explore next outcome <ArrowRight aria-hidden="true" size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className={styles.previewPanel}>
         <div className={styles.currentScreen} aria-atomic="true" aria-live="polite">
           <div className={styles.screenStatus}>
@@ -161,6 +200,7 @@ export function SimulationTray({
         ) : (
           <div className={styles.choices}>
             <h3>{currentInteraction ? "Choose an outcome" : "Choose an action"}</h3>
+            {isReviewShortcut && <p className={styles.shortcutNotice}>Review shortcut: jumped to a source state. The setup path is not counted.</p>}
             <div className={styles.choiceList}>
               {availableInteractions.map((interaction) => (
                 <button className={styles.choice} key={interaction.id} onClick={() => onChooseInteraction(interaction.id)} type="button">
@@ -168,15 +208,30 @@ export function SimulationTray({
                   <ArrowRight aria-hidden="true" size={17} />
                 </button>
               ))}
-              {currentInteraction?.outcomes.map((outcome) => (
-                <button className={styles.choice} key={outcome.id} onClick={() => onChooseOutcome(currentInteraction.id, outcome.id)} type="button">
-                  <span className={styles.outcomeTitle}>
-                    <span className={styles.outcomeDot} style={{ background: OUTCOME_COLORS[outcome.kind] }} />
-                    <span><strong>{outcome.name}</strong><small>{destinationLabel(project, outcome)}</small>{outcome.condition && <small>If {outcome.condition}</small>}</span>
-                  </span>
-                  <ArrowRight aria-hidden="true" size={17} />
-                </button>
-              ))}
+              {currentInteraction?.outcomes.map((outcome) => {
+                const check = currentChecks.get(outcome.id);
+                const isRecommended = check?.key === recommendedCheckKey && check?.status === "unexplored";
+                const needsFix = check?.status === "needs-fix" || check?.status === "unreachable";
+                return (
+                  <button className={`${styles.choice}${isRecommended ? ` ${styles.recommendedChoice}` : ""}`} key={outcome.id} onClick={() => onChooseOutcome(currentInteraction.id, outcome.id)} type="button">
+                    <span className={styles.outcomeTitle}>
+                      <span aria-hidden="true" className={styles.outcomeDot} style={{ background: OUTCOME_COLORS[outcome.kind] }} />
+                      <span>
+                        <strong>{outcome.name}</strong>
+                        <small>{destinationLabel(project, outcome)}</small>
+                        {outcome.condition && <small>If {outcome.condition}</small>}
+                        {check && (
+                          <span className={`${styles.outcomeCheck} ${check.status === "explored" ? styles.exploredCheck : needsFix ? styles.blockedCheck : ""}`}>
+                            {check.status === "explored" ? <Check aria-hidden="true" size={11} /> : needsFix ? <CircleAlert aria-hidden="true" size={11} /> : <Circle aria-hidden="true" size={9} />}
+                            {check.status === "explored" ? "Explored" : needsFix ? "Needs fixing" : isRecommended ? "Explore this outcome" : "Not explored"}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                    <ArrowRight aria-hidden="true" size={17} />
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

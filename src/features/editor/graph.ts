@@ -27,6 +27,8 @@ export const interactionNodeId = (interactionId: string) =>
 export const unresolvedNodeId = (outcomeId: string) =>
   `unresolved:${outcomeId}`;
 
+export const stickyNoteNodeId = (noteId: string) => `note:${noteId}`;
+
 export const STATE_VARIANTS: Record<
   CoreUIStateKind,
   ScreenPreviewVariant
@@ -298,6 +300,20 @@ export function buildEditorNodes(
     });
   }
 
+  for (const note of project.stickyNotes ?? []) {
+    nodes.push({
+      id: stickyNoteNodeId(note.id),
+      type: "stickyNote",
+      position: note.position,
+      width: note.size.width,
+      height: note.size.height,
+      style: { width: note.size.width, height: note.size.height },
+      dragHandle: ".sticky-note-drag-handle",
+      connectable: false,
+      data: { noteId: note.id, text: note.text },
+    });
+  }
+
   return nodes;
 }
 
@@ -435,6 +451,12 @@ export function applyNodePositions(
         positions.get(interactionNodeId(interaction.id)) ??
         interaction.position,
     })),
+    ...(project.stickyNotes ? {
+      stickyNotes: project.stickyNotes.map((note) => ({
+        ...note,
+        position: positions.get(stickyNoteNodeId(note.id)) ?? note.position,
+      })),
+    } : {}),
   };
 }
 

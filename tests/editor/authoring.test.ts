@@ -17,6 +17,44 @@ describe("simple editor defaults", () => {
     expect(freeScreenPosition([...occupied, { position: next, type: "screen" }], next).y).toBe(1030);
   });
 
+  it.each([
+    { width: 1000, height: 900 },
+    { measured: { width: 1000, height: 900 } },
+    { width: NaN, height: Infinity, measured: { width: 1000, height: 900 } },
+  ])("keeps newly added cards outside expanded notes using available dimensions: %j", (dimensions) => {
+    const occupied = [{ position: { x: 0, y: 0 }, type: "stickyNote", ...dimensions }];
+
+    expect(freeScreenPosition(occupied, { x: 400, y: 200 }))
+      .toEqual({ x: 400, y: 1130 });
+  });
+
+  it("prefers current explicit dimensions over an older measurement", () => {
+    const occupied = [{
+      position: { x: 0, y: 0 },
+      type: "stickyNote",
+      width: 300,
+      height: 200,
+      measured: { width: 1000, height: 900 },
+    }];
+
+    expect(freeScreenPosition(occupied, { x: 400, y: 200 }))
+      .toEqual({ x: 400, y: 200 });
+  });
+
+  it("keeps existing fallback geometry for missing or unusable dimensions", () => {
+    const position = { x: 40, y: 100 };
+    const occupied = [{
+      position,
+      type: "screen",
+      width: 0,
+      height: NaN,
+      measured: { width: -10, height: Infinity },
+    }];
+
+    expect(freeScreenPosition(occupied, position))
+      .toEqual(freeScreenPosition([{ position, type: "screen" }], position));
+  });
+
   it("removes unused states without changing referenced paths", () => {
     const next = removeUnusedState(starterProject, "payment-error", "payment-error-idle");
     expect(next.nodes.find((node) => node.id === "payment-error")?.states).toHaveLength(1);

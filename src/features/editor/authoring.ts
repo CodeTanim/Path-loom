@@ -1,14 +1,30 @@
 import type { CanvasPosition, ProjectDocument } from "@/domain";
 
-/** Keep new cards clear of screens, actions, and unresolved outcome placeholders. */
+type OccupiedCanvasItem = {
+  position: CanvasPosition;
+  type?: string;
+  width?: number;
+  height?: number;
+  measured?: { width?: number; height?: number };
+};
+
+function validDimension(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/** Keep new cards clear of screens, actions, notes, and unresolved placeholders. */
 export function freeScreenPosition(
-  occupied: { position: CanvasPosition; type?: string }[],
+  occupied: OccupiedCanvasItem[],
   preferred: CanvasPosition,
 ): CanvasPosition {
   const candidate = { x: Math.round(preferred.x / 10) * 10, y: Math.round(preferred.y / 10) * 10 };
   while (occupied.some((node) => {
-    const height = node.type === "interaction" ? 110 : node.type === "output" ? 60 : 260;
-    const width = node.type === "interaction" ? 220 : 270;
+    const height = validDimension(node.height) ?? validDimension(node.measured?.height) ??
+      (node.type === "interaction" ? 110 : node.type === "output" ? 60 : 260);
+    const width = validDimension(node.width) ?? validDimension(node.measured?.width) ??
+      (node.type === "interaction" ? 220 : 270);
     return candidate.x < node.position.x + width + 30 && candidate.x + 300 > node.position.x &&
       candidate.y < node.position.y + height + 30 && candidate.y + 290 > node.position.y;
   })) {

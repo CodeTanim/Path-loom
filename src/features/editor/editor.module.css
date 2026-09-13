@@ -1383,7 +1383,7 @@
 }
 
 .shell.previewShell {
-  --simulation-tray-height: 236px;
+  --simulation-tray-height: 280px;
   grid-template-columns: minmax(0, 1fr);
 }
 

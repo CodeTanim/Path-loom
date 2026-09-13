@@ -23,10 +23,12 @@ Checkout
 The editor is centered on one loop: **screen → action → outcomes → preview**.
 
 - A pannable, zoomable, draggable React Flow canvas
+- Editable yellow sticky notes: drag the header to move, drag the corner to resize, and undo/redo changes
 - Screen cards showing actual screen/state names, without pretending to render a finished app
 - Visible, movable interaction nodes with multiple semantic outcomes
 - One screen panel for naming screens, switching/adding states, and adding/selecting actions
 - A state-accurate journey simulator with branch selection, history, back, and restart
+- Saved, state-aware exploration progress with an outcome checklist, unexplored arrow labels, and a guided next-outcome shortcut
 - A live UX coverage checker for invalid references, missing states or outcomes, unresolved branches, dead ends, mismatched outcome states, and unreachable nodes
 - Contextual fixes and guided repairs that immediately rerun analysis
 - Undo/redo for document edits and canvas movement, plus keyboard shortcuts, connection handles, search, selection, and screen creation
@@ -38,6 +40,10 @@ The editor is centered on one loop: **screen → action → outcomes → preview
 New browsers start on **Your flows**. Create a blank flow or try the payment example: success reaches confirmation, while a decline can return to checkout. Existing browser drafts migrate into the dashboard; the original saved draft is retained as a backup. Each project has an independent editor URL. **Load example** asks before replacing the current flow and can be undone until the tab closes.
 
 **Preview** tests modeled screen/state transitions and lets you choose outcomes. It does not process payments, make real requests, or generate an interactive production UI. **Check flow** finds structural gaps in what you modeled; it cannot guarantee complete UX coverage.
+
+**Flow review** remembers which outcome checks you have followed in Preview. An action available in multiple reachable states has separate checks for those states. **Explore next outcome** jumps to the relevant source state and action; only choosing an outcome and reaching its destination counts. Broken or unreachable outcomes stay visible as needing attention. Back, Restart, and reopening keep valid progress. Relevant screen, state, action, or destination edits reset affected checks; layout, arrow routes, and sticky notes do not. Exploration is not approval, and completing the count does not guarantee a complete or correct experience.
+
+Right-click an empty part of the canvas and choose **Add sticky note** to place a note there, or use the sidebar button to add one in your current view. Neither action changes your pan or zoom; notes near an edge are kept visible where possible. Type directly on the note; its text, position, and size save with the project. Select a note to reveal its resize corner (also keyboard-accessible with arrow keys). Notes are separate from screens, never create flow-check findings, and are hidden during Preview.
 
 ## Run locally
 
@@ -57,7 +63,7 @@ Start with **Try an example** on the dashboard, then:
 1. Select a screen in the outline or use **Add screen**. Give it a name. Open **States** and check the states it supports; click a state's name to show it on the canvas. The **Initial** badge marks the state used when no specific arrival state is chosen.
 2. Choose **Add action**, name what the user does, then name each outcome and choose its destination screen and state. New actions are available in all states unless you narrow their scope in advanced settings.
 3. Choose **Preview** to focus the start screen on the canvas. Use the bottom tray to choose **Pay**, then **Success** or **Declined**. The canvas follows each step and highlights the path traveled. Use **Back** to try another outcome or **Restart** to return to the start; you can still pan and zoom to explore the graph.
-4. Return to the editor. Mark a screen as an ending when the journey should finish there, or add another action to continue it.
+4. Use **Explore next outcome** to jump to an untried choice. The payment example has three outcome checks: Success, Declined, and Return to checkout. Progress is saved with the project. Return to the editor to see the checklist; mark a screen as an ending when the journey should finish there, or add another action to continue it.
 5. Open **Check flow** when you want help finding unfinished paths. Drag cards to rearrange them and use **Undo** / **Redo** for edits.
 6. Use the Pathloom back button to return to **Your flows**. Rename or duplicate your project, then reopen it. Reload to confirm persistence. Guest drafts belong to this browser and origin.
 
@@ -126,6 +132,7 @@ src/
   domain/
     model.ts                 Serializable Pathloom document contract
     analyze.ts               Pure state-pair graph and coverage analysis
+    exploration.ts           State-aware outcome checks and semantic progress invalidation
     validate.ts              Saved-document validation boundary
     samples/starter.ts       Small working payment example
     samples/checkout.ts      Larger analyzer test fixture
@@ -134,6 +141,7 @@ src/
     graph.ts                 Domain-to-React-Flow projection
     Inspector.tsx            Screen/action editing and optional flow checks
     SimulationTray.tsx       Ephemeral journey simulation
+    ExplorationPanel.tsx    Persistent review progress and guided next-outcome entry
     components/              Stateful screen previews and custom nodes
   features/projects/         Dashboard, local library, migration, and cloud sync
   features/account/          Optional Clerk provider and account controls
@@ -146,7 +154,7 @@ tests/projects/              Local persistence, migration, and sync safety tests
 tests/cloud/                 Auth, request-validation, and API ownership tests
 ```
 
-The `ProjectDocument` is authoritative. React Flow nodes and edges are projections of that data, and simulator state stays ephemeral. This keeps the model portable to future renderers, collaboration layers, import/export, and schema migrations.
+The `ProjectDocument` is authoritative. React Flow nodes and edges are projections of that data. The current simulator cursor and journey stay ephemeral; versioned exploration visits are saved with the project and reconciled against semantic fingerprints. This keeps the model portable to future renderers, collaboration layers, import/export, and schema migrations.
 
 ## Near-term roadmap
 

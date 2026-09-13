@@ -1,5 +1,13 @@
 import {
   CORE_UI_STATE_KINDS,
+  EXPLORATION_FINGERPRINT_MAX_LENGTH,
+  EXPLORATION_VISIT_LIMIT,
+  STICKY_NOTE_LIMIT,
+  STICKY_NOTE_MAX_HEIGHT,
+  STICKY_NOTE_MAX_TEXT_LENGTH,
+  STICKY_NOTE_MAX_WIDTH,
+  STICKY_NOTE_MIN_HEIGHT,
+  STICKY_NOTE_MIN_WIDTH,
   type FlowNodeKind,
   type InteractionKind,
   type InteractionTrigger,
@@ -101,7 +109,10 @@ function hasSafeProjectedIds(
   );
   if (
     [...nodeIds].some(
-      (id) => id.startsWith("interaction:") || id.startsWith("unresolved:"),
+      (id) =>
+        id.startsWith("interaction:") ||
+        id.startsWith("unresolved:") ||
+        id.startsWith("note:"),
     )
   ) {
     return false;
@@ -160,6 +171,49 @@ function isSize(value: unknown) {
       Number.isFinite(value.width) &&
       typeof value.height === "number" &&
       Number.isFinite(value.height))
+  );
+}
+
+function isStickyNote(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.id) &&
+    typeof value.text === "string" &&
+    value.text.length <= STICKY_NOTE_MAX_TEXT_LENGTH &&
+    isPosition(value.position) &&
+    isRecord(value.size) &&
+    typeof value.size.width === "number" &&
+    Number.isFinite(value.size.width) &&
+    value.size.width >= STICKY_NOTE_MIN_WIDTH &&
+    value.size.width <= STICKY_NOTE_MAX_WIDTH &&
+    typeof value.size.height === "number" &&
+    Number.isFinite(value.size.height) &&
+    value.size.height >= STICKY_NOTE_MIN_HEIGHT &&
+    value.size.height <= STICKY_NOTE_MAX_HEIGHT
+  );
+}
+
+function isExploration(value: unknown) {
+  if (value === undefined) return true;
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !Array.isArray(value.visits) ||
+    value.visits.length > EXPLORATION_VISIT_LIMIT
+  ) {
+    return false;
+  }
+
+  // References may be stale after an edit or an import; reconciliation handles
+  // their meaning. The storage boundary only checks the bounded JSON shape.
+  return value.visits.every(
+    (visit) =>
+      isRecord(visit) &&
+      isNonEmptyString(visit.interactionId) &&
+      isNonEmptyString(visit.outcomeId) &&
+      isNonEmptyString(visit.sourceStateId) &&
+      isNonEmptyString(visit.fingerprint) &&
+      visit.fingerprint.length <= EXPLORATION_FINGERPRINT_MAX_LENGTH,
   );
 }
 
@@ -257,7 +311,13 @@ export function isPathloomDocument(value: unknown): value is PathloomDocument {
     value.interactions.every(isInteraction) &&
     hasUniqueEntityIds(value.interactions) &&
     hasGloballyUniqueOutcomeIds(value.interactions) &&
-    hasSafeProjectedIds(value.nodes, value.interactions)
+    hasSafeProjectedIds(value.nodes, value.interactions) &&
+    (value.stickyNotes === undefined ||
+      (Array.isArray(value.stickyNotes) &&
+        value.stickyNotes.length <= STICKY_NOTE_LIMIT &&
+        value.stickyNotes.every(isStickyNote) &&
+        hasUniqueEntityIds(value.stickyNotes))) &&
+    isExploration(value.exploration)
   );
 }
 

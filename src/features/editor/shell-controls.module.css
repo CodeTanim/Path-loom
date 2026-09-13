@@ -102,6 +102,31 @@
   border-bottom: 1px solid var(--ui-border);
 }
 
+.addNote {
+  width: 100%;
+  min-height: 30px;
+  font-size: 11px;
+}
+
+.notesSection {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ui-border);
+}
+
+.notesSection h3 {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 8px;
+  color: var(--ui-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.notesSection h3 span {
+  color: var(--ui-subtle);
+}
+
 .sidebarTitle {
   display: flex;
   justify-content: space-between;
