@@ -18,6 +18,25 @@ Checkout
 
 > Figma helps you design screens. Pathloom helps you design and debug what happens between and around those screens.
 
+## Screenshots
+
+Build a payment flow on the canvas, with separate success, decline, and retry paths.
+
+![Pathloom editor showing a payment flow with branching outcomes and screen states](docs/screenshots/editor.jpg)
+
+<details>
+<summary>See Preview and flow review</summary>
+
+**Preview** follows modeled screen/state transitions on the canvas. Choose an outcome to explore its path; this simulates the flow, not a finished interactive app.
+
+![Pathloom on-canvas Preview with payment outcome choices in the simulation tray](docs/screenshots/preview.jpg)
+
+**Flow review** keeps human Needs work flags and notes separate from exploration progress. Exploring or resolving an outcome is not approval of the flow.
+
+![Pathloom flow review panel showing exploration progress and an outcome flagged Needs work with a review note](docs/screenshots/flow-review.jpg)
+
+</details>
+
 ## Current core
 
 The editor is centered on one loop: **screen → action → outcomes → preview**.
