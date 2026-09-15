@@ -3,9 +3,10 @@
   top: 16px;
   left: 16px;
   z-index: 5;
-  width: min(290px, calc(100% - 32px));
+  width: max-content;
+  max-width: calc(100% - 32px);
   max-height: calc(100% - 96px);
-  padding: 12px;
+  padding: 0;
   overflow: auto;
   border: 1px solid var(--ui-border);
   border-radius: 5px;
@@ -17,9 +18,20 @@
   scrollbar-color: #595959 transparent;
 }
 
-.header { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--ui-text); }
-.header h2 { margin: 0; font-size: 11px; font-weight: 600; }
-.header > svg { color: var(--ui-accent); }
+.expanded { width: min(290px, calc(100% - 32px)); }
+.heading { position: sticky; top: 0; z-index: 1; margin: 0; background: var(--ui-panel); }
+.toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; width: 100%; min-height: 38px; padding: 10px; border: 0; color: var(--ui-text); background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; text-align: left; }
+.toggle:hover { background: var(--ui-field); }
+.toggle:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -3px; }
+.toggle > svg { flex-shrink: 0; }
+.reviewIcon { color: var(--ui-accent); }
+.compactProgress { color: var(--ui-muted); font-weight: 400; white-space: nowrap; }
+.flagCount { display: inline-flex; align-items: center; gap: 4px; padding-left: 7px; border-left: 1px solid var(--ui-border); color: var(--ui-muted); font-weight: 500; }
+.flagCount.hasFlags { color: #f0c475; }
+.toggleChevron { margin-left: auto; color: var(--ui-muted); }
+.expanded .toggleChevron { transform: rotate(90deg); }
+.expanded .heading { border-bottom: 1px solid var(--ui-border); }
+.content { padding: 12px; }
 .progress { margin: 0; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
 .progress strong { color: var(--ui-text); font-size: 14px; font-weight: 600; }
 .progressBar { display: block; appearance: none; width: 100%; height: 3px; margin-top: 9px; overflow: hidden; border: 0; border-radius: 2px; background: var(--ui-field); color: var(--ui-accent); }
@@ -54,3 +66,25 @@
 .status.explored { color: var(--ui-accent); }
 .context { display: block; margin-top: 6px; color: var(--ui-muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .reason { margin: 4px 0 0; color: #f0c475; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.reviews { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--ui-border); }
+.reviews > summary { display: flex; align-items: center; gap: 6px; margin: 0; color: #f0c475; font-size: 11px; font-weight: 600; cursor: pointer; list-style: none; }
+.reviews > summary::-webkit-details-marker { display: none; }
+.reviews > summary span { display: inline-flex; justify-content: center; min-width: 19px; padding: 2px 5px; border-radius: 3px; color: #f0c475; background: #423726; font-size: 10px; }
+.reviews > summary small { color: var(--ui-muted); font-size: 10px; font-weight: 400; }
+.reviewChevron { margin-left: auto; }
+.reviews[open] > summary .reviewChevron { transform: rotate(90deg); }
+.reviewCaption { margin: 7px 0; color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+.reviewList { max-height: min(260px, 34vh); margin: 8px 0 0; padding: 0; overflow: auto; list-style: none; }
+.reviewItem { padding: 9px 0; border-top: 1px solid var(--ui-border); }
+.reviewItem > strong { color: var(--ui-text); font-size: 11px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.reviewNote, .noReviewNote { margin: 7px 0; color: var(--ui-text); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.noReviewNote { color: var(--ui-muted); font-size: 10px; }
+.reviewActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+.reviewActions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 5px 7px; border: 1px solid var(--ui-border); border-radius: 3px; color: var(--ui-text); background: var(--ui-field); font-size: 10px; cursor: pointer; }
+.reviewActions button:first-child { color: var(--ui-accent); }
+.reviewActions button:hover { border-color: var(--ui-accent); }
+.resolvedReviews { margin-top: 7px; }
+.resolvedReviews > summary { display: flex; align-items: center; gap: 5px; padding: 6px 0; color: var(--ui-muted); font-size: 10px; cursor: pointer; list-style: none; }
+.resolvedReviews > summary::-webkit-details-marker { display: none; }
+.resolvedReviews[open] > summary svg { transform: rotate(90deg); }
+.reviewActions button:focus-visible, .resolvedReviews > summary:focus-visible, .reviews > summary:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }

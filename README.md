@@ -29,6 +29,7 @@ The editor is centered on one loop: **screen → action → outcomes → preview
 - One screen panel for naming screens, switching/adding states, and adding/selecting actions
 - A state-accurate journey simulator with branch selection, history, back, and restart
 - Saved, state-aware exploration progress with an outcome checklist, unexplored arrow labels, and a guided next-outcome shortcut
+- Outcome-level Needs work flags with autosaved review notes, revisit shortcuts, and explicit Resolve/Reopen
 - A live UX coverage checker for invalid references, missing states or outcomes, unresolved branches, dead ends, mismatched outcome states, and unreachable nodes
 - Contextual fixes and guided repairs that immediately rerun analysis
 - Undo/redo for document edits and canvas movement, plus keyboard shortcuts, connection handles, search, selection, and screen creation
@@ -41,7 +42,11 @@ New browsers start on **Your flows**. Create a blank flow or try the payment exa
 
 **Preview** tests modeled screen/state transitions and lets you choose outcomes. It does not process payments, make real requests, or generate an interactive production UI. **Check flow** finds structural gaps in what you modeled; it cannot guarantee complete UX coverage.
 
+**Flow review** starts as a compact canvas bar showing exploration progress and open flags. Click it to open the review tools; click it again, press Escape within the panel, or click outside to collapse it. The details remain readable without permanently covering the canvas.
+
 **Flow review** remembers which outcome checks you have followed in Preview. An action available in multiple reachable states has separate checks for those states. **Explore next outcome** jumps to the relevant source state and action; only choosing an outcome and reaching its destination counts. Broken or unreachable outcomes stay visible as needing attention. Back, Restart, and reopening keep valid progress. Relevant screen, state, action, or destination edits reset affected checks; layout, arrow routes, and sticky notes do not. Exploration is not approval, and completing the count does not guarantee a complete or correct experience.
+
+During Preview, flag an outcome as **Needs work** before choosing it or after seeing its result. Add an optional note; edits save as you type. Flow review keeps these findings separate from exploration and structural issues. **Revisit** opens the recorded source state and highlights that outcome without counting a traversal. If that context is no longer available, **Show in editor** takes you to the outcome instead. **Resolve** closes a finding while retaining its note, and **Reopen** brings it back. Neither action approves the flow. One flag applies to the whole outcome; the recorded state supplies review context. Notes survive flow edits and unrelated design Undo. Deleting their outcome removes them; Undo can restore them. This increment supports 200 findings per project and 1,000 characters per note.
 
 Right-click an empty part of the canvas and choose **Add sticky note** to place a note there, or use the sidebar button to add one in your current view. Neither action changes your pan or zoom; notes near an edge are kept visible where possible. Type directly on the note; its text, position, and size save with the project. Select a note to reveal its resize corner (also keyboard-accessible with arrow keys). Notes are separate from screens, never create flow-check findings, and are hidden during Preview.
 

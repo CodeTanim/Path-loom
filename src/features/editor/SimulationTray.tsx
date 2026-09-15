@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, CircleAlert, Monitor, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, CircleAlert, Flag, Monitor, RotateCcw, X } from "lucide-react";
 
-import type { ExplorationSummary, Outcome, ProjectDocument } from "@/domain";
+import { getOutcomeReview, OUTCOME_REVIEW_LIMIT, type ExplorationSummary, type Outcome, type OutcomeReview, type ProjectDocument } from "../../domain";
+import { OutcomeReviewControl } from "./OutcomeReviewControl";
 import { OUTCOME_COLORS } from "./graph";
 import styles from "./preview.module.css";
 
@@ -39,6 +40,9 @@ interface SimulationTrayProps {
   recommendedCheckKey?: string | null;
   onCheckFlow?: () => void;
   flowIssueCount?: number;
+  recentOutcome?: Pick<OutcomeReview, "interactionId" | "outcomeId" | "sourceNodeId" | "sourceStateId">;
+  reviewOutcomeId?: string | null;
+  onReviewChange?: (review: OutcomeReview) => void;
 }
 
 function destinationLabel(project: ProjectDocument, outcome: Outcome) {
@@ -49,6 +53,12 @@ function destinationLabel(project: ProjectDocument, outcome: Outcome) {
   const state = node.states.find((item) => item.id === stateId);
   if (!state) return `${node.name} · destination state is missing`;
   return `${node.name} · ${state.name}`;
+}
+
+function reviewContextLabel(project: ProjectDocument, context: Pick<OutcomeReview, "sourceNodeId" | "sourceStateId">) {
+  const source = project.nodes.find((node) => node.id === context.sourceNodeId);
+  const state = source?.states.find((item) => item.id === context.sourceStateId);
+  return `${source?.name || "Missing screen"} · ${state?.name || (context.sourceStateId === null ? "No recorded state" : "Missing state")}`;
 }
 
 export function SimulationTray({
@@ -66,6 +76,9 @@ export function SimulationTray({
   recommendedCheckKey,
   onCheckFlow,
   flowIssueCount = 0,
+  recentOutcome,
+  reviewOutcomeId,
+  onReviewChange,
 }: SimulationTrayProps) {
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
   const cursorNode = project.nodes.find((node) => node.id === cursor.nodeId);
@@ -74,6 +87,12 @@ export function SimulationTray({
     ? project.interactions.find((interaction) => interaction.id === cursor.id)
     : undefined;
   const currentState = cursorNode?.states.find((state) => state.id === cursor.stateId);
+  const atReviewLimit = (project.outcomeReviews?.items.length ?? 0) >= OUTCOME_REVIEW_LIMIT;
+  const recentInteraction = cursor.type !== "interaction" && recentOutcome
+    ? project.interactions.find((interaction) => interaction.id === recentOutcome.interactionId)
+    : undefined;
+  const recentBranch = recentInteraction?.outcomes.find((outcome) => outcome.id === recentOutcome?.outcomeId);
+  const recentReview = recentOutcome ? getOutcomeReview(project, recentOutcome.interactionId, recentOutcome.outcomeId) : null;
   const currentChecks = new Map(exploration?.checks
     .filter((check) => check.interactionId === currentInteraction?.id && check.sourceStateId === cursor.stateId)
     .map((check) => [check.outcomeId, check]));
@@ -178,7 +197,8 @@ export function SimulationTray({
       )}
 
       <div className={styles.previewPanel}>
-        <div className={styles.currentScreen} aria-atomic="true" aria-live="polite">
+        <div className={styles.currentScreen}>
+          <div aria-atomic="true" aria-live="polite">
           <div className={styles.screenStatus}>
             {isBlocked || isDeadEnd ? <CircleAlert aria-hidden="true" size={17} /> : isComplete ? <CheckCircle2 aria-hidden="true" size={17} /> : <Monitor aria-hidden="true" size={17} />}
             {statusLabel}
@@ -186,7 +206,29 @@ export function SimulationTray({
           <h2 ref={statusHeadingRef} tabIndex={-1}>{title}</h2>
           {!isBlocked && currentState && <span className={styles.stateBadge}>{currentState.name}</span>}
           {!isBlocked && description && <p className={styles.screenDescription}>{description}</p>}
+          </div>
         </div>
+
+        <div className={`${styles.previewChoicesPane}${recentOutcome && recentInteraction && recentBranch && onReviewChange ? ` ${styles.withRecentOutcome}` : ""}`}>
+          {recentOutcome && recentInteraction && recentBranch && onReviewChange && (
+            <div aria-label="Last outcome review" className={styles.recentReview}>
+              <div className={styles.recentReviewContext}>
+                <span className={styles.recentReviewLabel}>Last outcome</span>
+                <strong>{recentInteraction.name} → {recentBranch.name}</strong>
+                <p>{reviewContextLabel(project, recentReview ?? recentOutcome)}</p>
+              </div>
+              <OutcomeReviewControl
+                actionName={recentInteraction.name}
+                atLimit={atReviewLimit}
+                context={recentOutcome}
+                contextLabel={reviewContextLabel(project, recentReview ?? recentOutcome)}
+                key={`${recentOutcome.interactionId}-${recentOutcome.outcomeId}`}
+                onChange={onReviewChange}
+                outcomeName={recentBranch.name}
+                review={recentReview ?? undefined}
+              />
+            </div>
+          )}
 
         {isStopped ? (
           <div className={styles.stoppedChoices}>
@@ -200,6 +242,7 @@ export function SimulationTray({
         ) : (
           <div className={styles.choices}>
             <h3>{currentInteraction ? "Choose an outcome" : "Choose an action"}</h3>
+            {currentInteraction && onReviewChange && <p className={styles.reviewNotice}>Flag an outcome without following it. Flags are separate from exploration.</p>}
             {isReviewShortcut && <p className={styles.shortcutNotice}>Review shortcut: jumped to a source state. The setup path is not counted.</p>}
             <div className={styles.choiceList}>
               {availableInteractions.map((interaction) => (
@@ -212,14 +255,19 @@ export function SimulationTray({
                 const check = currentChecks.get(outcome.id);
                 const isRecommended = check?.key === recommendedCheckKey && check?.status === "unexplored";
                 const needsFix = check?.status === "needs-fix" || check?.status === "unreachable";
+                const review = getOutcomeReview(project, currentInteraction.id, outcome.id);
+                const isReviewTarget = reviewOutcomeId === outcome.id;
+                const context = { interactionId: currentInteraction.id, outcomeId: outcome.id, sourceNodeId: cursor.nodeId, sourceStateId: cursor.stateId };
                 return (
-                  <button className={`${styles.choice}${isRecommended ? ` ${styles.recommendedChoice}` : ""}`} key={outcome.id} onClick={() => onChooseOutcome(currentInteraction.id, outcome.id)} type="button">
+                  <div className={styles.outcomeChoice} key={outcome.id}>
+                  <button className={`${styles.choice}${isRecommended ? ` ${styles.recommendedChoice}` : ""}${isReviewTarget ? ` ${styles.reviewTargetChoice}` : ""}`} onClick={() => onChooseOutcome(currentInteraction.id, outcome.id)} type="button">
                     <span className={styles.outcomeTitle}>
                       <span aria-hidden="true" className={styles.outcomeDot} style={{ background: OUTCOME_COLORS[outcome.kind] }} />
                       <span>
                         <strong>{outcome.name}</strong>
                         <small>{destinationLabel(project, outcome)}</small>
                         {outcome.condition && <small>If {outcome.condition}</small>}
+                        {isReviewTarget && <span className={styles.reviewTargetLabel}><Flag aria-hidden="true" size={11} />Review this outcome</span>}
                         {check && (
                           <span className={`${styles.outcomeCheck} ${check.status === "explored" ? styles.exploredCheck : needsFix ? styles.blockedCheck : ""}`}>
                             {check.status === "explored" ? <Check aria-hidden="true" size={11} /> : needsFix ? <CircleAlert aria-hidden="true" size={11} /> : <Circle aria-hidden="true" size={9} />}
@@ -230,11 +278,26 @@ export function SimulationTray({
                     </span>
                     <ArrowRight aria-hidden="true" size={17} />
                   </button>
+                  {onReviewChange && (
+                    <OutcomeReviewControl
+                      actionName={currentInteraction.name}
+                      atLimit={atReviewLimit}
+                      context={context}
+                      contextLabel={reviewContextLabel(project, review ?? context)}
+                      highlighted={isReviewTarget}
+                      key={`${outcome.id}-${isReviewTarget}`}
+                      onChange={onReviewChange}
+                      outcomeName={outcome.name}
+                      review={review ?? undefined}
+                    />
+                  )}
+                  </div>
                 );
               })}
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {journey.length > 0 && (

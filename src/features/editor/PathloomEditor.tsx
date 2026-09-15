@@ -34,8 +34,13 @@ import {
   analyzeProject,
   getExplorationSummary,
   getNextUnexploredCheck,
+  getOutcomeReview,
+  getOutcomeReviewSummary,
   recordExploredOutcome,
   reconcileExploration,
+  reconcileOutcomeReviews,
+  setOutcomeReview,
+  OUTCOME_REVIEW_LIMIT,
   STICKY_NOTE_DEFAULT_WIDTH,
   STICKY_NOTE_DEFAULT_HEIGHT,
   STICKY_NOTE_LIMIT,
@@ -52,6 +57,7 @@ import {
   type Interaction,
   type Outcome,
   type OutcomeKind,
+  type OutcomeReview,
   type ProjectDocument,
   type UIState,
   type StickyNote,
@@ -114,6 +120,7 @@ interface SimulationState {
   journey: string[];
   traversedEdgeIds: string[];
   visitedNodeIds: string[];
+  recentOutcome?: Pick<OutcomeReview, "interactionId" | "outcomeId" | "sourceNodeId" | "sourceStateId">;
 }
 
 const titleCase = (value: string) =>
@@ -215,9 +222,10 @@ interface PathloomEditorProps {
 }
 
 export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, extraActions }: PathloomEditorProps) {
-  const [project, setProject] = useState<ProjectDocument>(() => reconcileExploration(initialProject));
+  const [project, setProject] = useState<ProjectDocument>(() => reconcileOutcomeReviews(reconcileExploration(initialProject)));
   const analysis = useMemo(() => analyzeProject(project), [project]);
   const exploration = useMemo(() => getExplorationSummary(project, analysis), [project, analysis]);
+  const reviews = useMemo(() => getOutcomeReviewSummary(project, analysis), [project, analysis]);
   const [initialNodes] = useState(() => buildEditorNodes(initialProject, analyzeProject(initialProject)));
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -235,6 +243,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
   );
   const [simulationPast, setSimulationPastState] = useState<SimulationState[]>([]);
   const [recommendedCheckKey, setRecommendedCheckKey] = useState<string | null>(null);
+  const [reviewOutcomeId, setReviewOutcomeId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{
     position: CanvasPosition;
@@ -316,7 +325,10 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
   const restoreSnapshot = useCallback(
     (snapshot: EditorSnapshot) => {
       editingNoteRef.current = null;
-      const restored = reconcileExploration(snapshot.project, projectRef.current.exploration?.visits);
+      const restored = reconcileOutcomeReviews(
+        reconcileExploration(snapshot.project, projectRef.current.exploration?.visits),
+        projectRef.current.outcomeReviews?.items,
+      );
       projectRef.current = restored;
       nodesRef.current = cloneNodes(snapshot.nodes);
       setProject(restored);
@@ -338,7 +350,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         selectedId,
       };
       pushPast(before);
-      const reconciled = reconcileExploration(nextProject);
+      const reconciled = reconcileOutcomeReviews(reconcileExploration(nextProject));
       const resetChecks = Math.max(0, (nextProject.exploration?.visits.length ?? 0) - (reconciled.exploration?.visits.length ?? 0));
       const nextAnalysis = analyzeProject(reconciled);
       const nextNodes = resetPositions
@@ -1474,6 +1486,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     setCoverageOpen(false);
     setSimulation(next);
     setRecommendedCheckKey(null);
+    setReviewOutcomeId(null);
     closeCanvasMenu();
     setSimulationPast([]);
     syncPreviewToCursor(next.cursor);
@@ -1500,6 +1513,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     setSelectedEdgeId(null);
     setFocusedOutcomeId(null);
     setRecommendedCheckKey(check.key);
+    setReviewOutcomeId(null);
     const next: SimulationState = {
       cursor: { type: "interaction", id: check.interactionId, nodeId: check.sourceNodeId, stateId: check.sourceStateId },
       journey: [`Review shortcut: ${check.sourceName} · ${check.sourceStateName}`, check.interactionName],
@@ -1518,6 +1532,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     setSelectedEdgeId(null);
     setSimulationPast([]);
     setRecommendedCheckKey(null);
+    setReviewOutcomeId(null);
     const cursor = simulationRef.current.cursor;
     if (cursor.type === "blocked" && cursor.outcomeId) {
       const outcomeId = cursor.outcomeId;
@@ -1534,6 +1549,59 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     if (modeRef.current === "simulate") stopSimulation();
     setCoverageOpen(true);
   }, [stopSimulation]);
+
+  const changeOutcomeReview = useCallback((review: OutcomeReview) => {
+    const current = projectRef.current;
+    const previous = getOutcomeReview(current, review.interactionId, review.outcomeId);
+    const next = setOutcomeReview(current, review);
+    if (next === current) {
+      if (!previous && (current.outcomeReviews?.items.length ?? 0) >= OUTCOME_REVIEW_LIMIT) {
+        showToast(`This flow supports up to ${OUTCOME_REVIEW_LIMIT} outcome review notes`);
+      }
+      return;
+    }
+    // Review activity is saved metadata, independent of traversal and design Undo.
+    projectRef.current = next;
+    setProject(next);
+    persist(next);
+    if (!previous) showToast("Outcome flagged as Needs work");
+    else if (previous.status !== review.status) showToast(review.status === "resolved"
+      ? "Finding resolved — this does not approve the flow"
+      : "Finding reopened as Needs work");
+  }, [persist, showToast]);
+
+  const revisitOutcomeReview = useCallback((interactionId: string, outcomeId: string) => {
+    const item = getOutcomeReviewSummary(projectRef.current).items.find((review) =>
+      review.interactionId === interactionId && review.outcomeId === outcomeId,
+    );
+    if (!item) return;
+    if (!item.canRevisit || item.sourceStateId === null) {
+      if (modeRef.current === "simulate") stopSimulation();
+      setCoverageOpen(false);
+      selectAndCenter(interactionNodeId(interactionId));
+      setFocusedOutcomeId(outcomeId);
+      showToast(item.reason ?? "This source context is unavailable. Review the outcome in the editor.");
+      return;
+    }
+    modeRef.current = "simulate";
+    setMode("simulate");
+    closeCanvasMenu();
+    setCoverageOpen(false);
+    setSelectedEdgeId(null);
+    setFocusedOutcomeId(null);
+    setRecommendedCheckKey(null);
+    setReviewOutcomeId(outcomeId);
+    const next: SimulationState = {
+      cursor: { type: "interaction", id: interactionId, nodeId: item.sourceNodeId, stateId: item.sourceStateId },
+      journey: [`Review shortcut: ${item.sourceName} · ${item.sourceStateName}`, item.interactionName],
+      traversedEdgeIds: [],
+      visitedNodeIds: [item.sourceNodeId, interactionNodeId(interactionId)],
+    };
+    setSimulation(next);
+    setSimulationPast([]);
+    syncPreviewToCursor(next.cursor);
+    setSelectedId(interactionNodeId(interactionId));
+  }, [closeCanvasMenu, selectAndCenter, setSimulation, setSimulationPast, showToast, stopSimulation, syncPreviewToCursor]);
 
   const chooseInteraction = useCallback(
     (interactionId: string) => {
@@ -1554,6 +1622,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       setSimulationPast((items) => [...items, active]);
       setSimulation((current) => ({
         ...current,
+        recentOutcome: undefined,
         cursor: {
           type: "interaction",
           id: interactionId,
@@ -1596,10 +1665,18 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
         (interaction.sourceStateId !== null && interaction.sourceStateId !== active.cursor.stateId)) return;
       setSimulationPast((items) => [...items, active]);
       setRecommendedCheckKey(null);
+      setReviewOutcomeId(null);
+      const recentOutcome = {
+        interactionId,
+        outcomeId,
+        sourceNodeId: source.id,
+        sourceStateId: active.cursor.stateId,
+      };
 
       if (!outcome.target) {
         setSimulation((current) => ({
           ...current,
+          recentOutcome,
           cursor: {
             type: "blocked",
             reason: "unresolved",
@@ -1623,6 +1700,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       if (!destination) {
         setSimulation((current) => ({
           ...current,
+          recentOutcome,
           cursor: {
             type: "blocked",
             reason: "broken",
@@ -1646,6 +1724,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       ) {
         setSimulation((current) => ({
           ...current,
+          recentOutcome,
           cursor: {
             type: "blocked",
             reason: "broken",
@@ -1663,6 +1742,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       if (destinationStateId === null) {
         setSimulation((current) => ({
           ...current,
+          recentOutcome,
           cursor: {
             type: "blocked",
             reason: "broken",
@@ -1694,6 +1774,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
       syncPreviewToCursor(nextCursor);
       setSimulation((current) => ({
         ...current,
+        recentOutcome,
         cursor: nextCursor,
         journey: [
           ...current.journey,
@@ -1714,6 +1795,7 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
     if (!previous) return;
     setSimulation(previous);
     setRecommendedCheckKey(null);
+    setReviewOutcomeId(null);
     setSimulationPast((items) => items.slice(0, -1));
     syncPreviewToCursor(previous.cursor);
     const focusId = simulationFocusId(previous.cursor);
@@ -2022,6 +2104,9 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
 
         {mode === "design" && !coverageOpen && (
           <ExplorationPanel
+            reviews={reviews}
+            onRevisitReview={revisitOutcomeReview}
+            onReviewChange={changeOutcomeReview}
             issueCount={analysis.issues.length}
             onCheckFlow={showFlowIssues}
             onExploreNext={exploreNextOutcome}
@@ -2113,6 +2198,9 @@ export function PathloomEditor({ initialProject, onPersist, onExit, saveLabel, e
 
         {mode === "simulate" && (
           <SimulationTray
+            recentOutcome={simulation.recentOutcome}
+            reviewOutcomeId={reviewOutcomeId}
+            onReviewChange={changeOutcomeReview}
             flowIssueCount={analysis.issues.length}
             exploration={exploration}
             recommendedCheckKey={recommendedCheckKey}

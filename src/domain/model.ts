@@ -139,6 +139,25 @@ export interface ProjectExploration {
   visits: ExplorationVisit[];
 }
 
+export const OUTCOME_REVIEW_LIMIT = 200;
+export const OUTCOME_REVIEW_NOTE_MAX_LENGTH = 1000;
+
+/** A human review flag; neither exploration progress nor a structural finding. */
+export interface OutcomeReview {
+  interactionId: string;
+  outcomeId: string;
+  /** The context where this outcome was flagged, kept even if the action moves. */
+  sourceNodeId: string;
+  sourceStateId: string | null;
+  note: string;
+  status: "needs-work" | "resolved";
+}
+
+export interface ProjectOutcomeReviews {
+  version: 1;
+  items: OutcomeReview[];
+}
+
 export interface ProjectDocument {
   schemaVersion: 1;
   id: string;
@@ -151,6 +170,8 @@ export interface ProjectDocument {
   stickyNotes?: StickyNote[];
   /** Exploration is progress, not approval or a claim that the product was tested. */
   exploration?: ProjectExploration;
+  /** Optional so existing v1 projects continue to load without migration. */
+  outcomeReviews?: ProjectOutcomeReviews;
 }
 
 /** Product-name alias for callers that prefer a more explicit document type. */

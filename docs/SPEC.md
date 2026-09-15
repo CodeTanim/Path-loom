@@ -436,6 +436,32 @@ The vertical slice is ready to call an MVP only when all are true:
 
 ## 10. Later roadmap
 
+### Compact flow review follow-up — 2026-09-14
+
+- Start Flow review collapsed into a compact canvas bar showing explored/total checks and only open flags. Label flows without outcomes clearly.
+- Expand on demand to retain progress, guided exploration, structural issue links, open/resolved findings, and the outcome checklist at their existing readable sizes.
+- Collapse with the same toggle, Escape within the panel (returning keyboard focus to the toggle), or an outside click without blocking the clicked canvas/inspector control.
+- Expansion is transient UI state; it does not change the graph, saved reviews, or exploration progress. Reopening the panel preserves its nested sections during the current editing session.
+
+Acceptance: verify compact initial/reload state, toggle open/close, nested flag controls, Escape focus recovery, click-outside dismissal, and unchanged review counts.
+
+Verification: 384 tests across 21 files, ESLint, and TypeScript pass. Browser checks confirmed the collapsed bar is 40 CSS pixels tall, full flag details remain accessible, the toggle and outside click dismiss correctly, Escape restores toggle focus, and reload starts collapsed with unchanged counts. No browser warnings or errors were observed.
+
+### Outcome review findings increment — 2026-09-14
+
+Scope: one user-authored **Needs work** flag per outcome, with an optional short note, revisit, and Resolve/Reopen. No approval scores, collaboration, issue export, or AI.
+
+- Flag an outcome from its Preview choices or immediately after following/attempting it. Flagging, writing a note, resolving, and reopening never traverse a branch or alter exploration counts or structural checks.
+- Store the source screen/state where the outcome was flagged for a state-correct review shortcut. A flag applies to the whole outcome; separate exploration checks still apply to each reachable state.
+- Flow review lists open findings separately from exploration and keeps resolved notes in a collapsed section. Resolving means the user closed this finding, not approval of the experience.
+- Revisit opens the recorded source state/action and identifies the flagged outcome without counting traversal. If that source context is no longer reachable or applicable, offer Show in editor with an explanation instead of fabricating a path.
+- Keep notes through semantic edits; never silently resolve them. Deleting an outcome removes its finding, and design Undo can restore it. Undo of unrelated design edits preserves subsequently created/edited/resolved findings. Review metadata itself uses explicit Resolve/Reopen rather than adding design-history steps.
+- Autosave note edits with optional versioned project metadata, bounded to 200 findings and 1,000 characters per note. Existing projects remain readable. Save failures continue to use the workspace's existing recovery UI.
+
+Acceptance: flag before/after traversal, write and reload a note, revisit without increasing exploration, resolve/reopen, preserve findings through edits and Undo, and handle missing/unreachable source contexts honestly.
+
+Verification: 376 tests across 20 files, ESLint, TypeScript, and the webpack production build pass. Browser QA in an isolated guest project verified flagging before traversal without advancing or counting it, flagging after a result with the original source state retained, autosaved notes across reload, Resolve/Reopen retaining notes, and targeted revisit without changing exploration counts. Undo of an earlier note creation preserved later outcome flags; semantic Undo preserved a newer resolution. An unreachable source offered Show in editor and selected its outcome, while a broken destination remained reviewable without counting the failed attempt. The post-result control stays visible at desktop size without enlarging the tray, and keyboard flagging focuses the note field. The fully explored example can still show open Needs work flags. No browser console warnings or errors were observed. Automated tests cover guest and account-cache persistence, failed saves/retries, and stale cloud responses; live cloud services remain unverified without credentials.
+
 ### Guided exploration increment — 2026-09-09
 
 Scope: connect Preview with saved exploration progress, while keeping structural flow findings separate from review activity. No manual approval, branch comments, QA export, AI, or screen composer in this increment.

@@ -2,6 +2,8 @@ import {
   CORE_UI_STATE_KINDS,
   EXPLORATION_FINGERPRINT_MAX_LENGTH,
   EXPLORATION_VISIT_LIMIT,
+  OUTCOME_REVIEW_LIMIT,
+  OUTCOME_REVIEW_NOTE_MAX_LENGTH,
   STICKY_NOTE_LIMIT,
   STICKY_NOTE_MAX_HEIGHT,
   STICKY_NOTE_MAX_TEXT_LENGTH,
@@ -217,6 +219,37 @@ function isExploration(value: unknown) {
   );
 }
 
+function isOutcomeReviews(value: unknown) {
+  if (value === undefined) return true;
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !Array.isArray(value.items) ||
+    value.items.length > OUTCOME_REVIEW_LIMIT
+  ) return false;
+
+  const keys = new Set<string>();
+  // Source references may become stale after editing. Keep the review so users
+  // can resolve it explicitly; reconciliation only removes deleted outcomes.
+  return value.items.every((review) => {
+    if (
+      !isRecord(review) ||
+      !isNonEmptyString(review.interactionId) ||
+      !isNonEmptyString(review.outcomeId) ||
+      !isNonEmptyString(review.sourceNodeId) ||
+      !isNullableReference(review.sourceStateId) ||
+      typeof review.note !== "string" ||
+      review.note.length > OUTCOME_REVIEW_NOTE_MAX_LENGTH ||
+      (review.status !== "needs-work" && review.status !== "resolved")
+    ) return false;
+
+    const key = JSON.stringify([review.interactionId, review.outcomeId]);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+}
+
 function isState(value: unknown) {
   return (
     isRecord(value) &&
@@ -317,7 +350,8 @@ export function isPathloomDocument(value: unknown): value is PathloomDocument {
         value.stickyNotes.length <= STICKY_NOTE_LIMIT &&
         value.stickyNotes.every(isStickyNote) &&
         hasUniqueEntityIds(value.stickyNotes))) &&
-    isExploration(value.exploration)
+    isExploration(value.exploration) &&
+    isOutcomeReviews(value.outcomeReviews)
   );
 }
 
